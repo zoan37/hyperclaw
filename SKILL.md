@@ -49,6 +49,8 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `user-funding` | Funding payments received/paid (USD) | `hl.py user-funding --days 7` |
 | `history` | Trade history from API | `hl.py history --limit 50` |
 | `portfolio` | Account value and PnL over time | `hl.py portfolio` |
+| `user-fees` | Fee schedule, volume tier, maker/taker rates | `hl.py user-fees` |
+| `historical-orders` | Full order history with statuses (filled/canceled/rejected) | `hl.py historical-orders --limit 50` |
 
 ### Market Data
 
@@ -64,6 +66,7 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `predicted-fundings [COINS]` | Predicted next funding (HL, Binance, Bybit) | `hl.py predicted-fundings BTC ETH` |
 | `trades COIN` | Recent trades with buy/sell flow | `hl.py trades BTC` |
 | `max-trade-size COIN` | Available margin to trade per direction | `hl.py max-trade-size SOL` |
+| `whale ADDR` | View any wallet's positions | `hl.py whale 0x1234...` |
 | `raw COIN` | Raw JSON data for processing | `hl.py raw BTC` |
 
 ### HIP-3 (Equity/Commodity Perps)

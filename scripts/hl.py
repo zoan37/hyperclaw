@@ -1372,6 +1372,145 @@ def cmd_user_funding(args):
         print(f"{Colors.RED}Error fetching user funding: {e}{Colors.END}")
 
 
+def cmd_whale(args):
+    """View positions of any Hyperliquid address."""
+    info, config = setup_info(require_credentials=False, include_hip3=True)
+    address = args.address
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}WHALE WATCH: {address[:10]}...{address[-6:]}{Colors.END}")
+    print("=" * 80)
+
+    try:
+        user_state = info.user_state(address)
+        margin_summary = user_state.get('marginSummary', {})
+        account_value = float(margin_summary.get('accountValue', 0))
+        total_margin = float(margin_summary.get('totalMarginUsed', 0))
+
+        print(f"\n  Account Value: {format_price(account_value)}")
+        print(f"  Margin Used:   {format_price(total_margin)}")
+
+        positions = user_state.get('assetPositions', [])
+        open_positions = [p for p in positions if float(p['position']['szi']) != 0]
+
+        if open_positions:
+            print(f"\n  {Colors.BOLD}Positions ({len(open_positions)}):{Colors.END}")
+            print(f"  {'Asset':<14} {'Side':<6} {'Size':>12} {'Entry':>12} {'Mark':>12} {'PnL':>15} {'Notional':>12}")
+            print("  " + "-" * 85)
+
+            for pos in open_positions:
+                p = pos['position']
+                coin = p['coin']
+                size = float(p['szi'])
+                entry_px = float(p['entryPx'])
+                unrealized_pnl = float(p['unrealizedPnl'])
+                mark_px = float(p.get('markPx', entry_px))
+                notional = abs(size) * mark_px
+                side = "LONG" if size > 0 else "SHORT"
+                side_color = Colors.GREEN if size > 0 else Colors.RED
+
+                print(f"  {coin:<14} {side_color}{side:<6}{Colors.END} {abs(size):>12.4f} {format_price(entry_px):>12} {format_price(mark_px):>12} {format_pnl(unrealized_pnl):>15} ${notional:>11,.0f}")
+        else:
+            print(f"\n  {Colors.DIM}No open positions{Colors.END}")
+
+        # Also check HIP-3 positions
+        try:
+            xyz_state = info.user_state(address, dex='xyz')
+            xyz_positions = xyz_state.get('assetPositions', [])
+            xyz_open = [p for p in xyz_positions if float(p['position']['szi']) != 0]
+
+            if xyz_open:
+                print(f"\n  {Colors.BOLD}HIP-3 Positions ({len(xyz_open)}):{Colors.END}")
+                print(f"  {'Asset':<14} {'Side':<6} {'Size':>12} {'Entry':>12} {'PnL':>15}")
+                print("  " + "-" * 65)
+
+                for pos in xyz_open:
+                    p = pos['position']
+                    coin = p['coin']
+                    size = float(p['szi'])
+                    entry_px = float(p['entryPx'])
+                    unrealized_pnl = float(p['unrealizedPnl'])
+                    side = "LONG" if size > 0 else "SHORT"
+                    side_color = Colors.GREEN if size > 0 else Colors.RED
+
+                    print(f"  {coin:<14} {side_color}{side:<6}{Colors.END} {abs(size):>12.4f} {format_price(entry_px):>12} {format_pnl(unrealized_pnl):>15}")
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching whale data: {e}{Colors.END}")
+
+
+def cmd_user_fees(args):
+    """Show fee schedule and volume info."""
+    info, config = setup_info(require_credentials=True)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}FEE SCHEDULE & VOLUME{Colors.END}")
+    print("=" * 60)
+
+    try:
+        fees = info.user_fees(config['account_address'])
+
+        if not fees:
+            print(f"{Colors.DIM}No fee data available{Colors.END}")
+            return
+
+        print(json.dumps(fees, indent=2))
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching fees: {e}{Colors.END}")
+
+
+def cmd_historical_orders(args):
+    """Show full order history with final statuses."""
+    info, config = setup_info(require_credentials=True)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}HISTORICAL ORDERS{Colors.END}")
+    print("=" * 90)
+
+    try:
+        orders = info.historical_orders(config['account_address'])
+
+        if not orders:
+            print(f"{Colors.DIM}No order history{Colors.END}")
+            return
+
+        limit = args.limit
+        recent = orders[-limit:] if len(orders) > limit else orders
+
+        print(f"\n  {'Time':<18} {'Asset':<12} {'Side':<6} {'Size':>10} {'Price':>12} {'Status':<12} {'Type'}")
+        print("  " + "-" * 85)
+
+        for entry in reversed(recent):
+            order = entry.get('order', entry)
+            status = entry.get('status', 'unknown')
+            ts = order.get('timestamp', entry.get('timestamp', 0))
+            dt = datetime.fromtimestamp(ts / 1000).strftime('%Y-%m-%d %H:%M') if ts else 'N/A'
+            coin = order.get('coin', '?')
+            side = "BUY" if order.get('side') == 'B' else "SELL"
+            side_color = Colors.GREEN if side == "BUY" else Colors.RED
+            sz = order.get('sz', order.get('origSz', '?'))
+            px = order.get('limitPx', '?')
+            order_type = order.get('orderType', '?')
+
+            # Color status
+            if status == 'filled':
+                status_str = f"{Colors.GREEN}{status}{Colors.END}"
+            elif status == 'canceled' or status == 'cancelled':
+                status_str = f"{Colors.YELLOW}{status}{Colors.END}"
+            elif status == 'rejected':
+                status_str = f"{Colors.RED}{status}{Colors.END}"
+            else:
+                status_str = status
+
+            px_str = format_price(float(px)) if px and px != '?' else px
+            print(f"  {dt:<18} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>10} {px_str:>12} {status_str:<21} {order_type}")
+
+        print(f"\n{Colors.DIM}Showing last {len(recent)} orders. Use --limit N for more.{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching historical orders: {e}{Colors.END}")
+
+
 # ============================================================================
 # ANALYSIS COMMANDS
 # ============================================================================
@@ -1989,6 +2128,14 @@ def main():
     uf_parser = subparsers.add_parser('user-funding', help='Funding payments received/paid')
     uf_parser.add_argument('--days', type=int, default=7, help='Number of days (default: 7)')
 
+    whale_parser = subparsers.add_parser('whale', help='View any address positions')
+    whale_parser.add_argument('address', help='Hyperliquid wallet address (0x...)')
+
+    subparsers.add_parser('user-fees', help='Fee schedule and volume info')
+
+    ho_parser = subparsers.add_parser('historical-orders', help='Full order history with statuses')
+    ho_parser.add_argument('--limit', type=int, default=50, help='Number of orders (default: 50)')
+
     # Analysis commands
     analyze_parser = subparsers.add_parser('analyze', help='Comprehensive analysis')
     analyze_parser.add_argument('coins', nargs='*', help='Assets to analyze')
@@ -2041,6 +2188,9 @@ def main():
         'trades': cmd_trades,
         'max-trade-size': cmd_max_trade_size,
         'user-funding': cmd_user_funding,
+        'whale': cmd_whale,
+        'user-fees': cmd_user_fees,
+        'historical-orders': cmd_historical_orders,
         'analyze': cmd_analyze,
         'raw': cmd_raw,
         'scan': cmd_scan,
