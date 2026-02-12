@@ -763,6 +763,51 @@ def cmd_cancel(args):
         print(f"{Colors.RED}Error canceling order: {e}{Colors.END}")
 
 
+def cmd_leverage(args):
+    """Set leverage for an asset."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    leverage = args.leverage
+
+    print(f"\n{Colors.BOLD}Set Leverage: {coin} → {leverage}x{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        # HIP-3 assets are always isolated margin
+        is_cross = not (':' in coin)
+
+        # Check max leverage from metadata
+        dex = coin.split(':')[0] if ':' in coin else None
+        try:
+            meta = info.meta(dex=dex) if dex else info.meta()
+            universe = meta.get('universe', [])
+            for asset in universe:
+                if asset['name'] == coin:
+                    max_lev = asset.get('maxLeverage', 0)
+                    margin_mode = asset.get('marginMode', '')
+                    if max_lev and leverage > max_lev:
+                        print(f"{Colors.RED}Error: {coin} max leverage is {max_lev}x{Colors.END}")
+                        return
+                    if margin_mode in ('strictIsolated', 'noCross'):
+                        is_cross = False
+                    print(f"  Max leverage: {max_lev}x | Mode: {'cross' if is_cross else 'isolated'}")
+                    break
+        except Exception:
+            pass
+
+        result = exchange.update_leverage(leverage, coin, is_cross=is_cross)
+
+        if result.get('status') == 'ok':
+            mode = "cross" if is_cross else "isolated"
+            print(f"\n{Colors.GREEN}Leverage set to {leverage}x ({mode})!{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error setting leverage: {e}{Colors.END}")
+
+
 def cmd_cancel_all(args):
     """Cancel all open orders."""
     exchange, info, config = setup_exchange()
@@ -1349,6 +1394,10 @@ def main():
 
     subparsers.add_parser('cancel-all', help='Cancel all open orders')
 
+    leverage_parser = subparsers.add_parser('leverage', help='Set leverage for an asset')
+    leverage_parser.add_argument('coin', help='Asset (e.g., SOL, xyz:TSLA)')
+    leverage_parser.add_argument('leverage', type=int, help='Leverage multiplier (1 to max)')
+
     # Analysis commands
     analyze_parser = subparsers.add_parser('analyze', help='Comprehensive analysis')
     analyze_parser.add_argument('coins', nargs='*', help='Assets to analyze')
@@ -1390,6 +1439,7 @@ def main():
         'close': cmd_close,
         'cancel': cmd_cancel,
         'cancel-all': cmd_cancel_all,
+        'leverage': cmd_leverage,
         'analyze': cmd_analyze,
         'raw': cmd_raw,
         'scan': cmd_scan,

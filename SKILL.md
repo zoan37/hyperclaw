@@ -80,6 +80,7 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `close COIN` | Close entire position | `hl.py close SOL` |
 | `cancel OID` | Cancel specific order | `hl.py cancel 12345` |
 | `cancel-all` | Cancel all open orders | `hl.py cancel-all` |
+| `leverage COIN LEV` | Set leverage (1 to max) | `hl.py leverage xyz:TSLA 3` |
 
 ### HIP-3 Trading
 
@@ -99,7 +100,7 @@ hl.py funding xyz:TSLA vntl:SPACEX km:US500
 - Per-position liquidation prices
 - Higher fees (2x normal)
 - Thinner order books (wider spreads)
-- Default leverage ~20x on equity perps (thin margin buffer)
+- Max leverage varies by asset (10x for most equities, 20x for commodities/metals). **The displayed leverage is the maximum, not fixed.** Use `leverage` command to set lower leverage before entering a position (e.g., `hl.py leverage xyz:TSLA 3` for 3x instead of 10x). Lower leverage = more margin = further liquidation price.
 
 ## Environment Variables
 
