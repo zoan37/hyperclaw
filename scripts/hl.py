@@ -148,6 +148,26 @@ def format_pnl(pnl: float) -> str:
         return f"{Colors.RED}-${abs(pnl):,.2f}{Colors.END}"
 
 
+def get_all_hip3_positions(info, address):
+    """Fetch open positions across all HIP-3 dexes. Returns list of position dicts."""
+    all_positions = []
+    try:
+        dexes = info.perp_dexs()
+        dex_names = [d.get('name') for d in dexes if d is not None and d.get('name')]
+    except Exception:
+        dex_names = ['xyz', 'vntl', 'flx', 'hyna', 'km', 'abcd', 'cash']
+    for dex_name in dex_names:
+        try:
+            state = info.user_state(address, dex=dex_name)
+            positions = state.get('assetPositions', [])
+            for p in positions:
+                if float(p['position']['szi']) != 0:
+                    all_positions.append(p)
+        except Exception:
+            pass
+    return all_positions
+
+
 # ============================================================================
 # READ-ONLY COMMANDS
 # ============================================================================
@@ -163,7 +183,6 @@ def cmd_status(args):
 
     try:
         user_state = info.user_state(config['account_address'])
-        xyz_state = info.user_state(config['account_address'], dex='xyz')
 
         margin_summary = user_state.get('marginSummary', {})
         account_value = float(margin_summary.get('accountValue', 0))
@@ -176,9 +195,9 @@ def cmd_status(args):
         print(f"  Margin Used:    {format_price(total_margin)}")
         print(f"  Withdrawable:   {format_price(withdrawable)}")
 
-        positions = user_state.get('assetPositions', [])
-        xyz_positions = xyz_state.get('assetPositions', [])
-        all_positions = positions + xyz_positions
+        native_positions = user_state.get('assetPositions', [])
+        hip3_positions = get_all_hip3_positions(info, config['account_address'])
+        all_positions = native_positions + hip3_positions
         open_positions = [p for p in all_positions if float(p['position']['szi']) != 0]
 
         if open_positions:
@@ -217,8 +236,10 @@ def cmd_positions(args):
 
     try:
         user_state = info.user_state(config['account_address'])
-        positions = user_state.get('assetPositions', [])
-        open_positions = [p for p in positions if float(p['position']['szi']) != 0]
+        native_positions = user_state.get('assetPositions', [])
+        hip3_positions = get_all_hip3_positions(info, config['account_address'])
+        all_positions = native_positions + hip3_positions
+        open_positions = [p for p in all_positions if float(p['position']['szi']) != 0]
 
         if not open_positions:
             print(f"\n{Colors.DIM}No open positions{Colors.END}")
@@ -618,13 +639,35 @@ def cmd_stop_loss(args):
         print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
 
     try:
-        all_mids = info.all_mids()
+        # Infer side from current position (most reliable)
+        dex = coin.split(':')[0] if ':' in coin else None
+        user_state = info.user_state(config['account_address'], dex=dex) if dex else info.user_state(config['account_address'])
+        positions = user_state.get('assetPositions', [])
+        position_size = 0
+        for pos in positions:
+            if pos['position']['coin'] == coin:
+                position_size = float(pos['position']['szi'])
+                break
+
+        # Show current price if available
+        all_mids = info.all_mids(dex=dex) if dex else info.all_mids()
         if coin in all_mids:
             current_price = float(all_mids[coin])
             diff_pct = ((trigger_price - current_price) / current_price) * 100
             print(f"Current price: {format_price(current_price)} ({diff_pct:+.2f}% from trigger)")
 
-        is_buy = trigger_price > current_price if coin in all_mids else not args.buy
+        if args.buy:
+            is_buy = True
+        elif position_size != 0:
+            # Long position → sell to close, short position → buy to close
+            is_buy = position_size < 0
+            side_label = "BUY (close short)" if is_buy else "SELL (close long)"
+            print(f"Position detected: {'LONG' if position_size > 0 else 'SHORT'} → {side_label}")
+        elif coin in all_mids:
+            is_buy = trigger_price > current_price
+        else:
+            print(f"{Colors.RED}Error: No position found and no price available for {coin}. Use --buy to force buy side.{Colors.END}")
+            return
 
         order_type = {
             "trigger": {
@@ -668,13 +711,34 @@ def cmd_take_profit(args):
         print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
 
     try:
-        all_mids = info.all_mids()
+        # Infer side from current position (most reliable)
+        dex = coin.split(':')[0] if ':' in coin else None
+        user_state = info.user_state(config['account_address'], dex=dex) if dex else info.user_state(config['account_address'])
+        positions = user_state.get('assetPositions', [])
+        position_size = 0
+        for pos in positions:
+            if pos['position']['coin'] == coin:
+                position_size = float(pos['position']['szi'])
+                break
+
+        # Show current price if available
+        all_mids = info.all_mids(dex=dex) if dex else info.all_mids()
         if coin in all_mids:
             current_price = float(all_mids[coin])
             diff_pct = ((trigger_price - current_price) / current_price) * 100
             print(f"Current price: {format_price(current_price)} ({diff_pct:+.2f}% from trigger)")
 
-        is_buy = trigger_price < current_price if coin in all_mids else args.buy
+        if args.buy:
+            is_buy = True
+        elif position_size != 0:
+            is_buy = position_size < 0
+            side_label = "BUY (close short)" if is_buy else "SELL (close long)"
+            print(f"Position detected: {'LONG' if position_size > 0 else 'SHORT'} → {side_label}")
+        elif coin in all_mids:
+            is_buy = trigger_price < current_price
+        else:
+            print(f"{Colors.RED}Error: No position found and no price available for {coin}. Use --buy to force buy side.{Colors.END}")
+            return
 
         order_type = {
             "trigger": {
@@ -1465,12 +1529,12 @@ def cmd_spot_meta(args):
         print(f"{Colors.RED}Error fetching spot meta: {e}{Colors.END}")
 
 
-def cmd_whale(args):
+def cmd_inspect(args):
     """View positions of any Hyperliquid address."""
-    info, config = setup_info(require_credentials=False, include_hip3=True)
+    info, config = setup_info(require_credentials=False, include_hip3=False)
     address = args.address
 
-    print(f"\n{Colors.BOLD}{Colors.CYAN}WHALE WATCH: {address[:10]}...{address[-6:]}{Colors.END}")
+    print(f"\n{Colors.BOLD}{Colors.CYAN}INSPECT: {address[:10]}...{address[-6:]}{Colors.END}")
     print("=" * 80)
 
     try:
@@ -1482,15 +1546,15 @@ def cmd_whale(args):
         print(f"\n  Account Value: {format_price(account_value)}")
         print(f"  Margin Used:   {format_price(total_margin)}")
 
-        positions = user_state.get('assetPositions', [])
-        open_positions = [p for p in positions if float(p['position']['szi']) != 0]
+        native_positions = user_state.get('assetPositions', [])
+        native_open = [p for p in native_positions if float(p['position']['szi']) != 0]
 
-        if open_positions:
-            print(f"\n  {Colors.BOLD}Positions ({len(open_positions)}):{Colors.END}")
+        if native_open:
+            print(f"\n  {Colors.BOLD}Perp Positions ({len(native_open)}):{Colors.END}")
             print(f"  {'Asset':<14} {'Side':<6} {'Size':>12} {'Entry':>12} {'Mark':>12} {'PnL':>15} {'Notional':>12}")
             print("  " + "-" * 85)
 
-            for pos in open_positions:
+            for pos in native_open:
                 p = pos['position']
                 coin = p['coin']
                 size = float(p['szi'])
@@ -1502,35 +1566,31 @@ def cmd_whale(args):
                 side_color = Colors.GREEN if size > 0 else Colors.RED
 
                 print(f"  {coin:<14} {side_color}{side:<6}{Colors.END} {abs(size):>12.4f} {format_price(entry_px):>12} {format_price(mark_px):>12} {format_pnl(unrealized_pnl):>15} ${notional:>11,.0f}")
-        else:
+
+        hip3_open = get_all_hip3_positions(info, address)
+        if hip3_open:
+            print(f"\n  {Colors.BOLD}HIP-3 Positions ({len(hip3_open)}):{Colors.END}")
+            print(f"  {'Asset':<14} {'Side':<6} {'Size':>12} {'Entry':>12} {'Mark':>12} {'PnL':>15} {'Notional':>12}")
+            print("  " + "-" * 85)
+
+            for pos in hip3_open:
+                p = pos['position']
+                coin = p['coin']
+                size = float(p['szi'])
+                entry_px = float(p['entryPx'])
+                unrealized_pnl = float(p['unrealizedPnl'])
+                mark_px = float(p.get('markPx', entry_px))
+                notional = abs(size) * mark_px
+                side = "LONG" if size > 0 else "SHORT"
+                side_color = Colors.GREEN if size > 0 else Colors.RED
+
+                print(f"  {coin:<14} {side_color}{side:<6}{Colors.END} {abs(size):>12.4f} {format_price(entry_px):>12} {format_price(mark_px):>12} {format_pnl(unrealized_pnl):>15} ${notional:>11,.0f}")
+
+        if not native_open and not hip3_open:
             print(f"\n  {Colors.DIM}No open positions{Colors.END}")
 
-        # Also check HIP-3 positions
-        try:
-            xyz_state = info.user_state(address, dex='xyz')
-            xyz_positions = xyz_state.get('assetPositions', [])
-            xyz_open = [p for p in xyz_positions if float(p['position']['szi']) != 0]
-
-            if xyz_open:
-                print(f"\n  {Colors.BOLD}HIP-3 Positions ({len(xyz_open)}):{Colors.END}")
-                print(f"  {'Asset':<14} {'Side':<6} {'Size':>12} {'Entry':>12} {'PnL':>15}")
-                print("  " + "-" * 65)
-
-                for pos in xyz_open:
-                    p = pos['position']
-                    coin = p['coin']
-                    size = float(p['szi'])
-                    entry_px = float(p['entryPx'])
-                    unrealized_pnl = float(p['unrealizedPnl'])
-                    side = "LONG" if size > 0 else "SHORT"
-                    side_color = Colors.GREEN if size > 0 else Colors.RED
-
-                    print(f"  {coin:<14} {side_color}{side:<6}{Colors.END} {abs(size):>12.4f} {format_price(entry_px):>12} {format_pnl(unrealized_pnl):>15}")
-        except Exception:
-            pass
-
     except Exception as e:
-        print(f"{Colors.RED}Error fetching whale data: {e}{Colors.END}")
+        print(f"{Colors.RED}Error inspecting address: {e}{Colors.END}")
 
 
 def cmd_user_fees(args):
@@ -2220,8 +2280,8 @@ def main():
     uf_parser = subparsers.add_parser('user-funding', help='Funding payments received/paid')
     uf_parser.add_argument('--days', type=int, default=7, help='Number of days (default: 7)')
 
-    whale_parser = subparsers.add_parser('whale', help='View any address positions')
-    whale_parser.add_argument('address', help='Hyperliquid wallet address (0x...)')
+    inspect_parser = subparsers.add_parser('inspect', help='View any address positions')
+    inspect_parser.add_argument('address', help='Hyperliquid wallet address (0x...)')
 
     subparsers.add_parser('spot-balances', help='Spot token balances')
 
@@ -2286,7 +2346,7 @@ def main():
         'trades': cmd_trades,
         'max-trade-size': cmd_max_trade_size,
         'user-funding': cmd_user_funding,
-        'whale': cmd_whale,
+        'inspect': cmd_inspect,
         'spot-balances': cmd_spot_balances,
         'spot-meta': cmd_spot_meta,
         'user-fees': cmd_user_fees,

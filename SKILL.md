@@ -63,7 +63,7 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `predicted-fundings [COINS]` | Predicted next funding (HL, Binance, Bybit) | `hl.py predicted-fundings BTC ETH` |
 | `trades COIN` | Recent trades with buy/sell flow | `hl.py trades BTC` |
 | `max-trade-size COIN` | Available margin to trade per direction | `hl.py max-trade-size SOL` |
-| `whale ADDR` | View any wallet's positions | `hl.py whale 0x1234...` |
+| `inspect ADDR` | View any wallet's positions (all dexes) | `hl.py inspect 0x1234...` |
 | `raw COIN` | Raw JSON data for processing | `hl.py raw BTC` |
 
 ### Spot Trading
