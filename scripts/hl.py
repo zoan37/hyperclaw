@@ -768,6 +768,124 @@ def cmd_cancel(args):
         print(f"{Colors.RED}Error canceling order: {e}{Colors.END}")
 
 
+def cmd_funding_history(args):
+    """Get historical funding rates for an asset."""
+    info, config = setup_info()
+    coin = args.coin
+    days = args.days
+
+    print(f"\n{Colors.BOLD}{coin} Funding History (last {days} days){Colors.END}")
+    print("=" * 70)
+
+    try:
+        import time as _time
+        end_time = int(_time.time() * 1000)
+        start_time = end_time - (days * 86400 * 1000)
+
+        history = info.funding_history(coin, start_time, end_time)
+
+        if not history:
+            print(f"{Colors.DIM}No funding history available{Colors.END}")
+            return
+
+        print(f"  {'Time':<18} {'Rate':>12} {'APR':>12} {'Premium':>12}")
+        print("  " + "-" * 55)
+
+        # Show last N entries (funding is every 8h on HL, so ~3/day)
+        limit = min(len(history), days * 3)
+        recent = history[-limit:]
+
+        rates = []
+        for entry in recent:
+            ts = entry.get('time', 0)
+            dt = datetime.fromtimestamp(ts / 1000).strftime('%Y-%m-%d %H:%M')
+            rate = float(entry.get('fundingRate', 0))
+            premium = float(entry.get('premium', 0))
+            apr = rate * 24 * 365 * 100
+            rate_pct = rate * 100
+            rates.append(rate)
+
+            rate_color = Colors.GREEN if rate < 0 else Colors.RED if rate > 0.0001 else Colors.YELLOW
+            print(f"  {dt:<18} {rate_color}{rate_pct:>11.4f}%{Colors.END} {apr:>11.1f}% {premium*100:>11.4f}%")
+
+        # Summary
+        if rates:
+            avg_rate = sum(rates) / len(rates)
+            avg_apr = avg_rate * 24 * 365 * 100
+            min_rate = min(rates)
+            max_rate = max(rates)
+            min_apr = min_rate * 24 * 365 * 100
+            max_apr = max_rate * 24 * 365 * 100
+
+            # Trend: compare first half avg to second half avg
+            mid = len(rates) // 2
+            if mid > 0:
+                first_half_avg = sum(rates[:mid]) / mid
+                second_half_avg = sum(rates[mid:]) / (len(rates) - mid)
+                if second_half_avg < first_half_avg - 0.00001:
+                    trend = f"{Colors.GREEN}trending more negative (shorts increasing){Colors.END}"
+                elif second_half_avg > first_half_avg + 0.00001:
+                    trend = f"{Colors.RED}trending more positive (longs increasing){Colors.END}"
+                else:
+                    trend = f"{Colors.YELLOW}stable{Colors.END}"
+            else:
+                trend = "insufficient data"
+
+            print(f"\n  Avg: {avg_apr:+.1f}% APR | Min: {min_apr:+.1f}% | Max: {max_apr:+.1f}%")
+            print(f"  Trend: {trend}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching funding history: {e}{Colors.END}")
+
+
+def cmd_portfolio(args):
+    """Show account portfolio performance over time."""
+    info, config = setup_info(require_credentials=True)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}PORTFOLIO PERFORMANCE{Colors.END}")
+    print("=" * 60)
+
+    try:
+        portfolio = info.portfolio(config['account_address'])
+
+        if not portfolio:
+            print(f"{Colors.DIM}No portfolio data available{Colors.END}")
+            return
+
+        # Portfolio returns data across timeframes
+        for period_key, period_data in portfolio.items():
+            if not isinstance(period_data, dict):
+                continue
+
+            label = period_key.replace('_', ' ').title()
+            account_values = period_data.get('accountValueHistory', [])
+            pnl_history = period_data.get('pnlHistory', [])
+            vlm = period_data.get('vlm', 0)
+
+            if account_values:
+                print(f"\n{Colors.BOLD}{label}:{Colors.END}")
+
+                # Show first and last values
+                if len(account_values) >= 2:
+                    first_val = float(account_values[0][1]) if isinstance(account_values[0], list) else float(account_values[0].get('accountValue', 0))
+                    last_val = float(account_values[-1][1]) if isinstance(account_values[-1], list) else float(account_values[-1].get('accountValue', 0))
+                    change = last_val - first_val
+                    change_pct = (change / first_val * 100) if first_val > 0 else 0
+
+                    print(f"  Account Value: {format_price(first_val)} → {format_price(last_val)} ({Colors.GREEN if change >= 0 else Colors.RED}{change_pct:+.2f}%{Colors.END})")
+
+                if pnl_history and len(pnl_history) >= 2:
+                    first_pnl = float(pnl_history[0][1]) if isinstance(pnl_history[0], list) else 0
+                    last_pnl = float(pnl_history[-1][1]) if isinstance(pnl_history[-1], list) else 0
+                    print(f"  Cumulative PnL: {format_pnl(last_pnl)}")
+
+                if vlm:
+                    print(f"  Volume: ${float(vlm):,.0f}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching portfolio: {e}{Colors.END}")
+
+
 def cmd_candles(args):
     """Get historical OHLCV candles for an asset."""
     info, config = setup_info()
@@ -1594,6 +1712,12 @@ def main():
     candles_parser.add_argument('--interval', default='1h', help='Interval: 1m, 5m, 15m, 1h, 4h, 1d (default: 1h)')
     candles_parser.add_argument('--count', type=int, default=24, help='Number of candles (default: 24)')
 
+    fh_parser = subparsers.add_parser('funding-history', help='Historical funding rates')
+    fh_parser.add_argument('coin', help='Asset (e.g., BTC, xyz:TSLA)')
+    fh_parser.add_argument('--days', type=int, default=7, help='Number of days (default: 7)')
+
+    subparsers.add_parser('portfolio', help='Account portfolio performance over time')
+
     # Analysis commands
     analyze_parser = subparsers.add_parser('analyze', help='Comprehensive analysis')
     analyze_parser.add_argument('coins', nargs='*', help='Assets to analyze')
@@ -1640,6 +1764,8 @@ def main():
         'modify-order': cmd_modify_order,
         'schedule-cancel': cmd_schedule_cancel,
         'candles': cmd_candles,
+        'funding-history': cmd_funding_history,
+        'portfolio': cmd_portfolio,
         'analyze': cmd_analyze,
         'raw': cmd_raw,
         'scan': cmd_scan,

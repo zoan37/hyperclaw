@@ -47,6 +47,7 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `positions` | Detailed position info (leverage, liquidation) | `hl.py positions` |
 | `orders` | List all open orders | `hl.py orders` |
 | `history` | Trade history from API | `hl.py history --limit 50` |
+| `portfolio` | Account value and PnL over time | `hl.py portfolio` |
 
 ### Market Data
 
@@ -56,6 +57,7 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `funding [COINS...]` | Funding rates (hourly + APR) | `hl.py funding BTC SOL DOGE` |
 | `book COIN` | L2 order book with spread | `hl.py book SOL` |
 | `candles COIN` | Historical OHLCV price candles | `hl.py candles BTC --interval 1d --count 30` |
+| `funding-history COIN` | Funding rate history with trend | `hl.py funding-history SOL --days 7` |
 | `scan` | Scan ALL 228+ perps for opportunities | `hl.py scan --top 30 --min-volume 1000000` |
 | `analyze [COINS...]` | Comprehensive market data dump | `hl.py analyze BTC ETH SOL` |
 | `raw COIN` | Raw JSON data for processing | `hl.py raw BTC` |
