@@ -1,22 +1,19 @@
 ---
 name: hyperclaw
-description: >-
-  Trade perpetual futures on Hyperliquid. Supports 228+ native perps and
-  HIP-3 equity/commodity perps (TSLA, GOLD, etc.). Commands for account
-  status, market data, funding rates, order book, trading, and market scanning.
+description: Trade on Hyperliquid. Supports 228+ perps, HIP-3 equity/commodity perps (TSLA, GOLD), and 270+ spot pairs. Commands for account status, market data, funding rates, order book, spot/perps trading, and market scanning.
 user-invocable: true
 ---
 
 # HyperClaw - Hyperliquid Trading Skill
 
-Trade perpetual futures on Hyperliquid via CLI. Covers native crypto perps (BTC, ETH, SOL, etc.) and HIP-3 builder-deployed perps (equities, commodities, forex).
+Trade on Hyperliquid via CLI. Covers native crypto perps (BTC, ETH, SOL, etc.), HIP-3 builder-deployed perps (equities, commodities, forex), and spot token trading (270+ pairs).
 
 ## Setup
 
 Run the setup script once to create a virtual environment and install dependencies:
 
 ```bash
-bash <skill-dir>/scripts/setup.sh
+bash {baseDir}/scripts/setup.sh
 ```
 
 Then configure `.env` in the skill root directory with your Hyperliquid API credentials:
@@ -34,7 +31,7 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 ## How to Run Commands
 
 ```bash
-<skill-dir>/scripts/.venv/bin/python <skill-dir>/scripts/hl.py <command> [args]
+{baseDir}/scripts/.venv/bin/python {baseDir}/scripts/hl.py <command> [args]
 ```
 
 ## Command Reference
@@ -68,6 +65,20 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `max-trade-size COIN` | Available margin to trade per direction | `hl.py max-trade-size SOL` |
 | `whale ADDR` | View any wallet's positions | `hl.py whale 0x1234...` |
 | `raw COIN` | Raw JSON data for processing | `hl.py raw BTC` |
+
+### Spot Trading
+
+Spot uses the same `buy`/`sell`/`limit-buy`/`limit-sell`/`close`/`cancel` commands as perps. The coin name is either `TOKEN/USDC` (e.g., `PURR/USDC`) for canonical pairs or `@N` (e.g., `@8`) for non-canonical pairs.
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `spot-balances` | Spot token balances | `hl.py spot-balances` |
+| `spot-meta` | List all spot pairs sorted by volume | `hl.py spot-meta --top 20 --min-volume 10000` |
+| `buy PURR/USDC 100` | Buy 100 PURR on spot | `hl.py buy PURR/USDC 100` |
+| `price PURR/USDC @1` | Spot prices | `hl.py price PURR/USDC @1` |
+| `book PURR/USDC` | Spot order book | `hl.py book PURR/USDC` |
+| `candles PURR/USDC` | Spot price history | `hl.py candles PURR/USDC --interval 1d` |
+| `trades PURR/USDC` | Recent spot trades | `hl.py trades PURR/USDC` |
 
 ### HIP-3 (Equity/Commodity Perps)
 

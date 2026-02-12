@@ -1372,6 +1372,98 @@ def cmd_user_funding(args):
         print(f"{Colors.RED}Error fetching user funding: {e}{Colors.END}")
 
 
+def cmd_spot_balances(args):
+    """Show spot token balances."""
+    info, config = setup_info(require_credentials=True, include_hip3=False)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}SPOT BALANCES{Colors.END}")
+    print("=" * 60)
+
+    try:
+        state = info.spot_user_state(config['account_address'])
+        balances = state.get('balances', [])
+
+        if not balances:
+            print(f"  {Colors.DIM}No spot token balances{Colors.END}")
+            return
+
+        print(f"\n  {'Token':<12} {'Total':>16} {'Hold':>16} {'Entry Price':>14}")
+        print("  " + "-" * 60)
+
+        for bal in balances:
+            coin = bal.get('coin', '?')
+            total = bal.get('total', '0')
+            hold = bal.get('hold', '0')
+            entry_ntl = float(bal.get('entryNtl', 0))
+            total_f = float(total)
+            entry_px = entry_ntl / total_f if total_f > 0 else 0
+
+            print(f"  {coin:<12} {total:>16} {hold:>16} {format_price(entry_px):>14}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching spot balances: {e}{Colors.END}")
+
+
+def cmd_spot_meta(args):
+    """List all spot tokens and trading pairs."""
+    info, config = setup_info(include_hip3=False)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}SPOT TOKENS & PAIRS{Colors.END}")
+    print("=" * 80)
+
+    try:
+        data = info.spot_meta_and_asset_ctxs()
+        meta = data[0]
+        ctxs = data[1]
+        tokens = meta.get('tokens', [])
+        universe = meta.get('universe', [])
+        token_names = {t['index']: t['name'] for t in tokens}
+
+        # Filter to canonical or those with volume
+        active_pairs = []
+        for i, pair in enumerate(universe):
+            ctx = ctxs[i] if i < len(ctxs) else {}
+            vol = float(ctx.get('dayNtlVlm', 0))
+            name = pair.get('name', '?')
+            toks = pair.get('tokens', [])
+            base = token_names.get(toks[0], '?') if len(toks) > 0 else '?'
+            quote = token_names.get(toks[1], '?') if len(toks) > 1 else '?'
+            mid_px = ctx.get('midPx', '0')
+            prev_px = float(ctx.get('prevDayPx', 0))
+            mark_px = float(ctx.get('markPx', 0))
+            price_chg = ((mark_px - prev_px) / prev_px * 100) if prev_px > 0 else 0
+            supply = ctx.get('circulatingSupply', '0')
+
+            active_pairs.append({
+                'name': name,
+                'pair': f"{base}/{quote}",
+                'price': mark_px,
+                'price_chg': price_chg,
+                'volume': vol,
+                'supply': float(supply),
+                'canonical': pair.get('isCanonical', False),
+            })
+
+        # Sort by volume
+        active_pairs.sort(key=lambda x: x['volume'], reverse=True)
+
+        # Show top by volume
+        min_vol = args.min_volume if hasattr(args, 'min_volume') and args.min_volume else 0
+        shown = [p for p in active_pairs if p['volume'] >= min_vol]
+        limit = args.top if hasattr(args, 'top') and args.top else 30
+
+        print(f"\n  Total pairs: {len(universe)} | Showing top {min(limit, len(shown))} by volume")
+        print(f"\n  {'Name':<12} {'Pair':<16} {'Price':>14} {'24h Chg':>8} {'24h Volume':>14}")
+        print("  " + "-" * 70)
+
+        for p in shown[:limit]:
+            chg_color = Colors.GREEN if p['price_chg'] >= 0 else Colors.RED
+            print(f"  {p['name']:<12} {p['pair']:<16} {format_price(p['price']):>14} {chg_color}{p['price_chg']:>+7.1f}%{Colors.END} ${p['volume']:>13,.0f}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching spot meta: {e}{Colors.END}")
+
+
 def cmd_whale(args):
     """View positions of any Hyperliquid address."""
     info, config = setup_info(require_credentials=False, include_hip3=True)
@@ -2131,6 +2223,12 @@ def main():
     whale_parser = subparsers.add_parser('whale', help='View any address positions')
     whale_parser.add_argument('address', help='Hyperliquid wallet address (0x...)')
 
+    subparsers.add_parser('spot-balances', help='Spot token balances')
+
+    spot_meta_parser = subparsers.add_parser('spot-meta', help='List spot tokens and pairs')
+    spot_meta_parser.add_argument('--top', type=int, default=30, help='Top pairs to show (default: 30)')
+    spot_meta_parser.add_argument('--min-volume', type=float, default=0, help='Min 24h volume filter')
+
     subparsers.add_parser('user-fees', help='Fee schedule and volume info')
 
     ho_parser = subparsers.add_parser('historical-orders', help='Full order history with statuses')
@@ -2189,6 +2287,8 @@ def main():
         'max-trade-size': cmd_max_trade_size,
         'user-funding': cmd_user_funding,
         'whale': cmd_whale,
+        'spot-balances': cmd_spot_balances,
+        'spot-meta': cmd_spot_meta,
         'user-fees': cmd_user_fees,
         'historical-orders': cmd_historical_orders,
         'analyze': cmd_analyze,
