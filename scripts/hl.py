@@ -1,0 +1,1408 @@
+#!/usr/bin/env python3
+"""
+HyperClaw - Hyperliquid Trading CLI for AI Agents
+
+Usage:
+    python hl.py status              # Account balance, positions, PnL
+    python hl.py positions           # Detailed position info
+    python hl.py price BTC           # Current price
+    python hl.py funding BTC         # Funding rate
+    python hl.py book BTC            # Order book
+    python hl.py buy BTC 0.01        # Market buy
+    python hl.py sell BTC 0.01       # Market sell
+    python hl.py limit-buy BTC 0.01 85000   # Limit buy
+    python hl.py limit-sell BTC 0.01 95000  # Limit sell
+    python hl.py close BTC           # Close position
+    python hl.py orders              # List open orders
+    python hl.py cancel ORDER_ID     # Cancel order
+    python hl.py cancel-all          # Cancel all orders
+    python hl.py scan                # Scan all perps for opportunities
+    python hl.py hip3                # HIP-3 equity perp data
+    python hl.py dexes               # List all HIP-3 dexes
+    python hl.py history             # Trade history
+"""
+
+import os
+import sys
+import json
+import argparse
+from datetime import datetime
+from typing import Optional
+from pathlib import Path
+
+# Load environment variables from .env file
+# Priority: HYPERCLAW_ENV env var > cwd/.env > script dir/.env
+from dotenv import load_dotenv
+
+_env_path = os.environ.get('HYPERCLAW_ENV')
+if _env_path and os.path.isfile(_env_path):
+    load_dotenv(_env_path)
+elif os.path.isfile('.env'):
+    load_dotenv('.env')
+else:
+    _script_dir = Path(__file__).resolve().parent.parent
+    _fallback_env = _script_dir / '.env'
+    if _fallback_env.is_file():
+        load_dotenv(str(_fallback_env))
+
+# Hyperliquid SDK imports
+try:
+    from hyperliquid.info import Info
+    from hyperliquid.exchange import Exchange
+    from hyperliquid.utils import constants
+    from eth_account import Account
+except ImportError:
+    print("Error: hyperliquid-python-sdk not installed.")
+    print("Run: pip install hyperliquid-python-sdk")
+    sys.exit(1)
+
+# ANSI colors
+class Colors:
+    GREEN = '\033[92m'
+    RED = '\033[91m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    BOLD = '\033[1m'
+    DIM = '\033[2m'
+    END = '\033[0m'
+
+
+def get_config(require_credentials: bool = True):
+    """Get Hyperliquid configuration from environment."""
+    account_address = os.getenv('HL_ACCOUNT_ADDRESS')
+    secret_key = os.getenv('HL_API_WALLET_KEY')
+    use_testnet = os.getenv('HL_TESTNET', 'true').lower() == 'true'
+
+    if require_credentials and (not account_address or not secret_key):
+        print(f"{Colors.RED}Error: Hyperliquid credentials not configured.{Colors.END}")
+        print(f"\nAdd to your .env file:")
+        print(f"  HL_ACCOUNT_ADDRESS=0x...  # Your wallet address")
+        print(f"  HL_API_WALLET_KEY=0x...   # API wallet private key")
+        print(f"  HL_TESTNET=true           # Optional: use testnet")
+        sys.exit(1)
+
+    api_url = constants.TESTNET_API_URL if use_testnet else constants.MAINNET_API_URL
+
+    return {
+        'account_address': account_address or '',
+        'secret_key': secret_key or '',
+        'api_url': api_url,
+        'is_testnet': use_testnet
+    }
+
+
+def get_all_dex_names(api_url: str) -> list:
+    """Fetch all available HIP-3 dex names from the API."""
+    try:
+        basic_info = Info(api_url, skip_ws=True)
+        all_dexes = basic_info.perp_dexs()
+        dex_names = ['']  # Native perps
+        for dex in all_dexes:
+            if dex is not None and dex.get('name'):
+                dex_names.append(dex.get('name'))
+        return dex_names
+    except Exception:
+        return ['', 'xyz', 'vntl', 'flx', 'hyna', 'km', 'abcd', 'cash']
+
+
+def setup_info(skip_ws: bool = True, require_credentials: bool = False, include_hip3: bool = True) -> tuple:
+    """Setup Info client for read-only operations."""
+    config = get_config(require_credentials=require_credentials)
+    perp_dexs = get_all_dex_names(config['api_url']) if include_hip3 else None
+    info = Info(config['api_url'], skip_ws=skip_ws, perp_dexs=perp_dexs)
+    return info, config
+
+
+def setup_exchange(skip_ws: bool = True, include_hip3: bool = True) -> tuple:
+    """Setup Exchange client for trading operations."""
+    config = get_config()
+    wallet = Account.from_key(config['secret_key'])
+    perp_dexs = get_all_dex_names(config['api_url']) if include_hip3 else None
+    exchange = Exchange(wallet, config['api_url'], account_address=config['account_address'], perp_dexs=perp_dexs)
+    info = Info(config['api_url'], skip_ws=skip_ws, perp_dexs=perp_dexs)
+    return exchange, info, config
+
+
+def format_price(price: float) -> str:
+    """Format price for display."""
+    if price >= 1000:
+        return f"${price:,.2f}"
+    elif price >= 1:
+        return f"${price:.2f}"
+    else:
+        return f"${price:.6f}"
+
+
+def format_pnl(pnl: float) -> str:
+    """Format PnL with color."""
+    if pnl >= 0:
+        return f"{Colors.GREEN}+${pnl:,.2f}{Colors.END}"
+    else:
+        return f"{Colors.RED}-${abs(pnl):,.2f}{Colors.END}"
+
+
+# ============================================================================
+# READ-ONLY COMMANDS
+# ============================================================================
+
+def cmd_status(args):
+    """Show account status: balance, equity, positions summary."""
+    info, config = setup_info(require_credentials=True, include_hip3=True)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}HYPERLIQUID ACCOUNT STATUS{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+    print("=" * 60)
+
+    try:
+        user_state = info.user_state(config['account_address'])
+        xyz_state = info.user_state(config['account_address'], dex='xyz')
+
+        margin_summary = user_state.get('marginSummary', {})
+        account_value = float(margin_summary.get('accountValue', 0))
+        total_margin = float(margin_summary.get('totalMarginUsed', 0))
+        total_pnl = float(margin_summary.get('totalRawUsd', 0))
+        withdrawable = float(user_state.get('withdrawable', 0))
+
+        print(f"\n{Colors.BOLD}Account Summary:{Colors.END}")
+        print(f"  Account Value:  {format_price(account_value)}")
+        print(f"  Margin Used:    {format_price(total_margin)}")
+        print(f"  Withdrawable:   {format_price(withdrawable)}")
+
+        positions = user_state.get('assetPositions', [])
+        xyz_positions = xyz_state.get('assetPositions', [])
+        all_positions = positions + xyz_positions
+        open_positions = [p for p in all_positions if float(p['position']['szi']) != 0]
+
+        if open_positions:
+            print(f"\n{Colors.BOLD}Open Positions ({len(open_positions)}):{Colors.END}")
+            print(f"  {'Asset':<12} {'Side':<6} {'Size':>12} {'Entry':>12} {'Mark':>12} {'PnL':>15}")
+            print("  " + "-" * 70)
+
+            total_unrealized = 0
+            for pos in open_positions:
+                p = pos['position']
+                coin = p['coin']
+                size = float(p['szi'])
+                entry_px = float(p['entryPx'])
+                unrealized_pnl = float(p['unrealizedPnl'])
+                mark_px = float(p.get('markPx', entry_px))
+                side = "LONG" if size > 0 else "SHORT"
+                side_color = Colors.GREEN if size > 0 else Colors.RED
+                total_unrealized += unrealized_pnl
+                print(f"  {coin:<12} {side_color}{side:<6}{Colors.END} {abs(size):>12.4f} {format_price(entry_px):>12} {format_price(mark_px):>12} {format_pnl(unrealized_pnl):>15}")
+
+            print("  " + "-" * 70)
+            print(f"  {'Total Unrealized PnL:':<52} {format_pnl(total_unrealized):>15}")
+        else:
+            print(f"\n{Colors.DIM}No open positions{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching account status: {e}{Colors.END}")
+
+
+def cmd_positions(args):
+    """Show detailed position information."""
+    info, config = setup_info(require_credentials=True)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}POSITION DETAILS{Colors.END}")
+    print("=" * 60)
+
+    try:
+        user_state = info.user_state(config['account_address'])
+        positions = user_state.get('assetPositions', [])
+        open_positions = [p for p in positions if float(p['position']['szi']) != 0]
+
+        if not open_positions:
+            print(f"\n{Colors.DIM}No open positions{Colors.END}")
+            return
+
+        for pos in open_positions:
+            p = pos['position']
+            coin = p['coin']
+            size = float(p['szi'])
+            entry_px = float(p['entryPx'])
+            unrealized_pnl = float(p['unrealizedPnl'])
+            leverage = p.get('leverage', {})
+            liq_px = float(p.get('liquidationPx', 0)) if p.get('liquidationPx') else None
+
+            side = "LONG" if size > 0 else "SHORT"
+            side_color = Colors.GREEN if size > 0 else Colors.RED
+
+            print(f"\n{Colors.BOLD}{coin}{Colors.END}")
+            print(f"  Side:           {side_color}{side}{Colors.END}")
+            print(f"  Size:           {abs(size):.4f}")
+            print(f"  Entry Price:    {format_price(entry_px)}")
+            print(f"  Unrealized PnL: {format_pnl(unrealized_pnl)}")
+            if leverage:
+                lev_type = leverage.get('type', 'unknown')
+                lev_val = leverage.get('value', 0)
+                print(f"  Leverage:       {lev_val}x ({lev_type})")
+            if liq_px:
+                print(f"  Liquidation:    {format_price(liq_px)}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching positions: {e}{Colors.END}")
+
+
+def cmd_price(args):
+    """Get current price for an asset."""
+    info, config = setup_info()
+    coins = args.coins if args.coins else ['BTC', 'ETH', 'SOL']
+
+    try:
+        mids_cache = {}
+
+        def get_price(coin):
+            if ':' in coin:
+                dex = coin.split(':')[0]
+                if dex not in mids_cache:
+                    mids_cache[dex] = info.all_mids(dex=dex)
+                return mids_cache[dex].get(coin)
+            else:
+                if '' not in mids_cache:
+                    mids_cache[''] = info.all_mids()
+                return mids_cache[''].get(coin)
+
+        print(f"\n{Colors.BOLD}Current Prices:{Colors.END}")
+        for coin in coins:
+            price = get_price(coin)
+            if price:
+                print(f"  {coin:<20} {format_price(float(price))}")
+            else:
+                print(f"  {coin:<20} {Colors.DIM}Not found{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching prices: {e}{Colors.END}")
+
+
+def cmd_funding(args):
+    """Get funding rates for assets."""
+    info, config = setup_info()
+    coins = args.coins if args.coins else ['BTC', 'ETH', 'SOL', 'DOGE', 'HYPE']
+
+    try:
+        meta = info.meta_and_asset_ctxs()
+        universe = meta[0]['universe']
+        asset_ctxs = meta[1]
+        name_to_idx = {asset['name']: i for i, asset in enumerate(universe)}
+
+        print(f"\n{Colors.BOLD}Funding Rates:{Colors.END}")
+        print(f"  {'Asset':<12} {'Hourly':>12} {'APR':>12} {'Signal':<20}")
+        print("  " + "-" * 55)
+
+        for coin in coins:
+            if coin in name_to_idx:
+                idx = name_to_idx[coin]
+                ctx = asset_ctxs[idx]
+                funding = float(ctx.get('funding', 0))
+                funding_pct = funding * 100
+                apr = funding * 24 * 365 * 100
+
+                if funding < -0.0001:
+                    signal = f"{Colors.GREEN}Shorts paying (bullish){Colors.END}"
+                elif funding > 0.0005:
+                    signal = f"{Colors.RED}Longs crowded (bearish){Colors.END}"
+                else:
+                    signal = f"{Colors.YELLOW}Neutral{Colors.END}"
+
+                print(f"  {coin:<12} {funding_pct:>11.4f}% {apr:>11.1f}% {signal}")
+            else:
+                # Try HIP-3 perps
+                try:
+                    all_dexes = info.perp_dexs()
+                    hip3_dexes = [d.get('name') for d in all_dexes if d is not None and d.get('name')]
+                except Exception:
+                    hip3_dexes = ['xyz', 'vntl', 'flx', 'hyna', 'km', 'abcd', 'cash']
+                found = False
+
+                if ':' in coin:
+                    coins_to_try = [coin]
+                else:
+                    coins_to_try = [f"{dex}:{coin}" for dex in hip3_dexes]
+
+                import requests
+                for try_coin in coins_to_try:
+                    try:
+                        resp = requests.post(
+                            config['api_url'] + "/info",
+                            json={"type": "fundingHistory", "coin": try_coin, "startTime": 0},
+                            timeout=10
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            if data:
+                                latest = data[-1]
+                                funding = float(latest.get('fundingRate', 0))
+                                funding_pct = funding * 100
+                                apr = funding * 24 * 365 * 100
+                                signal = f"{Colors.GREEN}Shorts paying{Colors.END}" if funding < 0 else f"{Colors.YELLOW}Longs paying{Colors.END}"
+                                print(f"  {try_coin:<16} {funding_pct:>11.4f}% {apr:>11.1f}% {signal}")
+                                found = True
+                                break
+                    except Exception:
+                        pass
+
+                if not found:
+                    print(f"  {coin:<12} {Colors.DIM}Not found{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching funding rates: {e}{Colors.END}")
+
+
+def cmd_book(args):
+    """Get order book for an asset."""
+    info, config = setup_info()
+    coin = args.coin
+
+    try:
+        book = info.l2_snapshot(coin)
+
+        print(f"\n{Colors.BOLD}{coin} Order Book:{Colors.END}")
+        print(f"  {'Bids':<30} {'Asks':<30}")
+        print("  " + "-" * 60)
+
+        bids = book.get('levels', [[]])[0][:5]
+        asks = book.get('levels', [[], []])[1][:5]
+
+        for i in range(max(len(bids), len(asks))):
+            bid_str = ""
+            ask_str = ""
+            if i < len(bids):
+                bid_str = f"{Colors.GREEN}{format_price(float(bids[i]['px']))} x {bids[i]['sz']}{Colors.END}"
+            if i < len(asks):
+                ask_str = f"{Colors.RED}{format_price(float(asks[i]['px']))} x {asks[i]['sz']}{Colors.END}"
+            print(f"  {bid_str:<40} {ask_str:<40}")
+
+        if bids and asks:
+            mid = (float(bids[0]['px']) + float(asks[0]['px'])) / 2
+            spread = float(asks[0]['px']) - float(bids[0]['px'])
+            spread_pct = (spread / mid) * 100
+            print(f"\n  Mid: {format_price(mid)} | Spread: {format_price(spread)} ({spread_pct:.3f}%)")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching order book: {e}{Colors.END}")
+
+
+def cmd_orders(args):
+    """List open orders."""
+    info, config = setup_info(require_credentials=True)
+
+    try:
+        open_orders = info.open_orders(config['account_address'])
+
+        print(f"\n{Colors.BOLD}Open Orders:{Colors.END}")
+
+        if not open_orders:
+            print(f"  {Colors.DIM}No open orders{Colors.END}")
+            return
+
+        print(f"  {'OID':<12} {'Asset':<12} {'Side':<6} {'Size':>12} {'Price':>12} {'Type':<10}")
+        print("  " + "-" * 70)
+
+        for order in open_orders:
+            oid = order.get('oid', 'N/A')
+            coin = order.get('coin', 'N/A')
+            side = "BUY" if order.get('side') == 'B' else "SELL"
+            side_color = Colors.GREEN if side == "BUY" else Colors.RED
+            sz = order.get('sz', '0')
+            px = float(order.get('limitPx', 0))
+            order_type = order.get('orderType', 'limit')
+
+            print(f"  {oid:<12} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>12} {format_price(px):>12} {order_type:<10}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching orders: {e}{Colors.END}")
+
+
+# ============================================================================
+# TRADING COMMANDS
+# ============================================================================
+
+def cmd_buy(args):
+    """Market buy."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    size = args.size
+
+    print(f"\n{Colors.BOLD}Market Buy: {size} {coin}{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        all_mids = info.all_mids()
+        if coin in all_mids:
+            current_price = float(all_mids[coin])
+            print(f"Current price: {format_price(current_price)}")
+            print(f"Estimated cost: {format_price(current_price * size)}")
+
+        result = exchange.market_open(coin, True, size, None, 0.01)
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'filled' in status:
+                    filled = status['filled']
+                    print(f"\n{Colors.GREEN}Order filled!{Colors.END}")
+                    print(f"  Size: {filled.get('totalSz')}")
+                    print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
+                    print(f"  OID: {filled.get('oid')}")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error executing buy: {e}{Colors.END}")
+
+
+def cmd_sell(args):
+    """Market sell."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    size = args.size
+
+    print(f"\n{Colors.BOLD}Market Sell: {size} {coin}{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        all_mids = info.all_mids()
+        if coin in all_mids:
+            current_price = float(all_mids[coin])
+            print(f"Current price: {format_price(current_price)}")
+
+        result = exchange.market_open(coin, False, size, None, 0.01)
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'filled' in status:
+                    filled = status['filled']
+                    print(f"\n{Colors.GREEN}Order filled!{Colors.END}")
+                    print(f"  Size: {filled.get('totalSz')}")
+                    print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
+                    print(f"  OID: {filled.get('oid')}")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error executing sell: {e}{Colors.END}")
+
+
+def cmd_limit_buy(args):
+    """Place limit buy order."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    size = args.size
+    price = args.price
+
+    print(f"\n{Colors.BOLD}Limit Buy: {size} {coin} @ {format_price(price)}{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        all_mids = info.all_mids()
+        if coin in all_mids:
+            current_price = float(all_mids[coin])
+            diff_pct = ((price - current_price) / current_price) * 100
+            print(f"Current price: {format_price(current_price)} ({diff_pct:+.2f}% from limit)")
+
+        result = exchange.order(coin, True, size, price, {"limit": {"tif": "Gtc"}})
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'resting' in status:
+                    print(f"\n{Colors.GREEN}Order placed!{Colors.END}")
+                    print(f"  OID: {status['resting'].get('oid')}")
+                elif 'filled' in status:
+                    filled = status['filled']
+                    print(f"\n{Colors.GREEN}Order filled immediately!{Colors.END}")
+                    print(f"  Size: {filled.get('totalSz')}")
+                    print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error placing limit buy: {e}{Colors.END}")
+
+
+def cmd_limit_sell(args):
+    """Place limit sell order."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    size = args.size
+    price = args.price
+
+    print(f"\n{Colors.BOLD}Limit Sell: {size} {coin} @ {format_price(price)}{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        all_mids = info.all_mids()
+        if coin in all_mids:
+            current_price = float(all_mids[coin])
+            diff_pct = ((price - current_price) / current_price) * 100
+            print(f"Current price: {format_price(current_price)} ({diff_pct:+.2f}% from limit)")
+
+        result = exchange.order(coin, False, size, price, {"limit": {"tif": "Gtc"}})
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'resting' in status:
+                    print(f"\n{Colors.GREEN}Order placed!{Colors.END}")
+                    print(f"  OID: {status['resting'].get('oid')}")
+                elif 'filled' in status:
+                    filled = status['filled']
+                    print(f"\n{Colors.GREEN}Order filled immediately!{Colors.END}")
+                    print(f"  Size: {filled.get('totalSz')}")
+                    print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error placing limit sell: {e}{Colors.END}")
+
+
+def cmd_stop_loss(args):
+    """Place a stop-loss trigger order."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    size = args.size
+    trigger_price = args.trigger_price
+
+    print(f"\n{Colors.BOLD}Stop-Loss: {size} {coin} @ trigger {format_price(trigger_price)}{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        all_mids = info.all_mids()
+        if coin in all_mids:
+            current_price = float(all_mids[coin])
+            diff_pct = ((trigger_price - current_price) / current_price) * 100
+            print(f"Current price: {format_price(current_price)} ({diff_pct:+.2f}% from trigger)")
+
+        is_buy = trigger_price > current_price if coin in all_mids else not args.buy
+
+        order_type = {
+            "trigger": {
+                "triggerPx": trigger_price,
+                "isMarket": True,
+                "tpsl": "sl"
+            }
+        }
+
+        result = exchange.order(coin, is_buy, size, trigger_price, order_type, reduce_only=True)
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'resting' in status:
+                    side = "BUY (close short)" if is_buy else "SELL (close long)"
+                    print(f"\n{Colors.GREEN}Stop-loss placed!{Colors.END}")
+                    print(f"  Side: {side}")
+                    print(f"  Trigger: {format_price(trigger_price)}")
+                    print(f"  Size: {size}")
+                    print(f"  OID: {status['resting'].get('oid')}")
+                    print(f"  Type: Market order when triggered")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error placing stop-loss: {e}{Colors.END}")
+
+
+def cmd_take_profit(args):
+    """Place a take-profit trigger order."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    size = args.size
+    trigger_price = args.trigger_price
+
+    print(f"\n{Colors.BOLD}Take-Profit: {size} {coin} @ trigger {format_price(trigger_price)}{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        all_mids = info.all_mids()
+        if coin in all_mids:
+            current_price = float(all_mids[coin])
+            diff_pct = ((trigger_price - current_price) / current_price) * 100
+            print(f"Current price: {format_price(current_price)} ({diff_pct:+.2f}% from trigger)")
+
+        is_buy = trigger_price < current_price if coin in all_mids else args.buy
+
+        order_type = {
+            "trigger": {
+                "triggerPx": trigger_price,
+                "isMarket": True,
+                "tpsl": "tp"
+            }
+        }
+
+        result = exchange.order(coin, is_buy, size, trigger_price, order_type, reduce_only=True)
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'resting' in status:
+                    side = "BUY (close short)" if is_buy else "SELL (close long)"
+                    print(f"\n{Colors.GREEN}Take-profit placed!{Colors.END}")
+                    print(f"  Side: {side}")
+                    print(f"  Trigger: {format_price(trigger_price)}")
+                    print(f"  Size: {size}")
+                    print(f"  OID: {status['resting'].get('oid')}")
+                    print(f"  Type: Market order when triggered")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error placing take-profit: {e}{Colors.END}")
+
+
+def cmd_close(args):
+    """Close entire position for an asset."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+
+    print(f"\n{Colors.BOLD}Closing {coin} position{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        dex = None
+        if ':' in coin:
+            dex = coin.split(':')[0]
+
+        if dex:
+            user_state = info.user_state(config['account_address'], dex=dex)
+        else:
+            user_state = info.user_state(config['account_address'])
+        positions = user_state.get('assetPositions', [])
+
+        position = None
+        for pos in positions:
+            if pos['position']['coin'] == coin:
+                position = pos['position']
+                break
+
+        if not position or float(position['szi']) == 0:
+            print(f"{Colors.YELLOW}No open position for {coin}{Colors.END}")
+            return
+
+        size = float(position['szi'])
+        entry_px = float(position['entryPx'])
+        unrealized_pnl = float(position['unrealizedPnl'])
+
+        print(f"Current position: {abs(size):.4f} {'LONG' if size > 0 else 'SHORT'}")
+        print(f"Entry: {format_price(entry_px)}")
+        print(f"Unrealized PnL: {format_pnl(unrealized_pnl)}")
+
+        result = exchange.market_close(coin)
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'filled' in status:
+                    filled = status['filled']
+                    print(f"\n{Colors.GREEN}Position closed!{Colors.END}")
+                    print(f"  Size: {filled.get('totalSz')}")
+                    print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Close failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error closing position: {e}{Colors.END}")
+
+
+def cmd_cancel(args):
+    """Cancel a specific order."""
+    exchange, info, config = setup_exchange()
+    oid = args.oid
+
+    try:
+        open_orders = info.open_orders(config['account_address'])
+
+        order = None
+        for o in open_orders:
+            if str(o.get('oid')) == str(oid):
+                order = o
+                break
+
+        if not order:
+            print(f"{Colors.YELLOW}Order {oid} not found in open orders{Colors.END}")
+            return
+
+        coin = order.get('coin')
+        print(f"\n{Colors.BOLD}Canceling order {oid} ({coin}){Colors.END}")
+
+        result = exchange.cancel(coin, oid)
+
+        if result.get('status') == 'ok':
+            print(f"{Colors.GREEN}Order canceled!{Colors.END}")
+        else:
+            print(f"{Colors.RED}Cancel failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error canceling order: {e}{Colors.END}")
+
+
+def cmd_cancel_all(args):
+    """Cancel all open orders."""
+    exchange, info, config = setup_exchange()
+
+    print(f"\n{Colors.BOLD}Canceling all open orders{Colors.END}")
+
+    try:
+        open_orders = info.open_orders(config['account_address'])
+
+        if not open_orders:
+            print(f"{Colors.DIM}No open orders to cancel{Colors.END}")
+            return
+
+        print(f"Found {len(open_orders)} open orders")
+
+        for order in open_orders:
+            coin = order.get('coin')
+            oid = order.get('oid')
+            try:
+                result = exchange.cancel(coin, oid)
+                if result.get('status') == 'ok':
+                    print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
+                else:
+                    print(f"  {Colors.RED}Failed to cancel {coin} order {oid}{Colors.END}")
+            except Exception as e:
+                print(f"  {Colors.RED}Error canceling {coin} order {oid}: {e}{Colors.END}")
+
+        print(f"\n{Colors.GREEN}Done!{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error canceling orders: {e}{Colors.END}")
+
+
+# ============================================================================
+# ANALYSIS COMMANDS
+# ============================================================================
+
+def cmd_analyze(args):
+    """Comprehensive market analysis with raw data."""
+    info, config = setup_info(require_credentials=False)
+
+    default_assets = ['BTC', 'ETH', 'SOL', 'DOGE', 'HYPE']
+    xyz_assets = ['xyz:TSLA', 'xyz:NVDA', 'xyz:AAPL']
+    coins = args.coins if args.coins else default_assets
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}COMPREHENSIVE MARKET ANALYSIS{Colors.END}")
+    print(f"Timestamp: {datetime.now().isoformat()}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+    print("=" * 80)
+
+    try:
+        # Account State
+        print(f"\n{Colors.BOLD}=== ACCOUNT STATE ==={Colors.END}")
+        if config['account_address']:
+            user_state = info.user_state(config['account_address'])
+            margin_summary = user_state.get('marginSummary', {})
+
+            print(f"Account Value: ${float(margin_summary.get('accountValue', 0)):,.2f}")
+            print(f"Total Margin Used: ${float(margin_summary.get('totalMarginUsed', 0)):,.2f}")
+            print(f"Withdrawable: ${float(user_state.get('withdrawable', 0)):,.2f}")
+
+            positions = user_state.get('assetPositions', [])
+            open_positions = [p for p in positions if float(p['position']['szi']) != 0]
+
+            if open_positions:
+                print(f"\nOpen Positions ({len(open_positions)}):")
+                for pos in open_positions:
+                    p = pos['position']
+                    size = float(p['szi'])
+                    entry = float(p['entryPx'])
+                    pnl = float(p['unrealizedPnl'])
+                    lev = p.get('leverage', {})
+                    print(f"  {p['coin']}: {size:+.4f} @ ${entry:,.2f} | PnL: ${pnl:+,.2f} | Leverage: {lev}")
+            else:
+                print("\nNo open positions")
+        else:
+            print(f"{Colors.DIM}No credentials configured - skipping account state{Colors.END}")
+
+        # Prices
+        print(f"\n{Colors.BOLD}=== CURRENT PRICES ==={Colors.END}")
+        all_mids = info.all_mids()
+        for coin in coins:
+            if coin in all_mids:
+                print(f"{coin}: ${float(all_mids[coin]):,.2f}")
+
+        # Funding Rates
+        print(f"\n{Colors.BOLD}=== FUNDING RATES & MARKET CONTEXT ==={Colors.END}")
+        meta = info.meta_and_asset_ctxs()
+        universe = meta[0]['universe']
+        asset_ctxs = meta[1]
+        name_to_idx = {asset['name']: i for i, asset in enumerate(universe)}
+
+        print(f"{'Asset':<10} {'Price':>12} {'Funding/hr':>12} {'Funding APR':>12} {'Open Interest':>15} {'24h Volume':>15}")
+        print("-" * 80)
+
+        for coin in coins:
+            if coin in name_to_idx:
+                idx = name_to_idx[coin]
+                ctx = asset_ctxs[idx]
+                price = float(ctx.get('markPx', 0))
+                funding = float(ctx.get('funding', 0))
+                oi = float(ctx.get('openInterest', 0))
+                vol = float(ctx.get('dayNtlVlm', 0))
+                funding_pct = funding * 100
+                funding_apr = funding * 24 * 365 * 100
+                print(f"{coin:<10} ${price:>10,.2f} {funding_pct:>11.4f}% {funding_apr:>11.1f}% ${oi:>13,.0f} ${vol:>13,.0f}")
+
+        # HIP-3 Equity Perps
+        print(f"\n{Colors.BOLD}=== HIP-3 EQUITY PERPS (trade.xyz) ==={Colors.END}")
+        import requests
+        for xyz_coin in xyz_assets:
+            try:
+                resp = requests.post(
+                    config['api_url'] + "/info",
+                    json={"type": "fundingHistory", "coin": xyz_coin, "startTime": 0},
+                    timeout=10
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data:
+                        latest = data[-1]
+                        funding = float(latest.get('fundingRate', 0))
+                        funding_pct = funding * 100
+                        funding_apr = funding * 24 * 365 * 100
+
+                        book_resp = requests.post(
+                            config['api_url'] + "/info",
+                            json={"type": "l2Book", "coin": xyz_coin},
+                            timeout=10
+                        )
+                        price = 0
+                        if book_resp.status_code == 200:
+                            book = book_resp.json()
+                            levels = book.get('levels', [])
+                            if len(levels) >= 2 and levels[0] and levels[1]:
+                                mid = (float(levels[0][0]['px']) + float(levels[1][0]['px'])) / 2
+                                price = mid
+
+                        print(f"{xyz_coin:<12} ${price:>10,.2f} | Funding: {funding_pct:.4f}%/hr ({funding_apr:.1f}% APR)")
+            except Exception as e:
+                print(f"{xyz_coin:<12} Error: {e}")
+
+        # Order Book Summary
+        print(f"\n{Colors.BOLD}=== ORDER BOOK SUMMARY ==={Colors.END}")
+        for coin in ['BTC', 'ETH', 'SOL']:
+            try:
+                book = info.l2_snapshot(coin)
+                bids = book.get('levels', [[]])[0]
+                asks = book.get('levels', [[], []])[1]
+
+                if bids and asks:
+                    best_bid = float(bids[0]['px'])
+                    best_ask = float(asks[0]['px'])
+                    mid = (best_bid + best_ask) / 2
+                    spread = best_ask - best_bid
+                    spread_bps = (spread / mid) * 10000
+                    bid_depth = sum(float(b['sz']) for b in bids[:10])
+                    ask_depth = sum(float(a['sz']) for a in asks[:10])
+                    imbalance = (bid_depth - ask_depth) / (bid_depth + ask_depth) if (bid_depth + ask_depth) > 0 else 0
+                    print(f"{coin}: Spread {spread_bps:.1f}bps | Bid depth: {bid_depth:.2f} | Ask depth: {ask_depth:.2f} | Imbalance: {imbalance:+.2%}")
+            except Exception:
+                pass
+
+    except Exception as e:
+        print(f"{Colors.RED}Error during analysis: {e}{Colors.END}")
+        import traceback
+        traceback.print_exc()
+
+
+def cmd_raw(args):
+    """Dump raw JSON data for specified asset."""
+    info, config = setup_info()
+    coin = args.coin
+
+    print(f"\n{Colors.BOLD}Raw Data Dump: {coin}{Colors.END}")
+    print("=" * 60)
+
+    try:
+        all_mids = info.all_mids()
+        if coin in all_mids:
+            print(f"\n--- Price ---")
+            print(f"mid_price: {all_mids[coin]}")
+
+        meta = info.meta_and_asset_ctxs()
+        universe = meta[0]['universe']
+        asset_ctxs = meta[1]
+        name_to_idx = {asset['name']: i for i, asset in enumerate(universe)}
+
+        if coin in name_to_idx:
+            idx = name_to_idx[coin]
+            print(f"\n--- Asset Metadata ---")
+            print(json.dumps(universe[idx], indent=2))
+            print(f"\n--- Asset Context ---")
+            print(json.dumps(asset_ctxs[idx], indent=2))
+
+        print(f"\n--- L2 Book (Top 5) ---")
+        book = info.l2_snapshot(coin)
+        print(json.dumps({
+            'bids': book.get('levels', [[]])[0][:5],
+            'asks': book.get('levels', [[], []])[1][:5]
+        }, indent=2))
+
+        print(f"\n--- Recent Trades (Last 10) ---")
+        import requests
+        resp = requests.post(
+            config['api_url'] + "/info",
+            json={"type": "recentTrades", "coin": coin},
+            timeout=10
+        )
+        if resp.status_code == 200:
+            trades = resp.json()[-10:]
+            print(json.dumps(trades, indent=2))
+
+    except Exception as e:
+        print(f"{Colors.RED}Error: {e}{Colors.END}")
+
+
+def cmd_scan(args):
+    """Scan all assets for trading opportunities based on funding rates."""
+    info, config = setup_info()
+
+    min_volume = args.min_volume if hasattr(args, 'min_volume') and args.min_volume else 100000
+    top_n = args.top if hasattr(args, 'top') and args.top else 20
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}MARKET SCANNER - ALL HYPERLIQUID PERPS{Colors.END}")
+    print(f"Timestamp: {datetime.now().isoformat()}")
+    print(f"Filter: Min 24h volume > ${min_volume:,}")
+    print("=" * 90)
+
+    try:
+        meta = info.meta_and_asset_ctxs()
+        universe = meta[0]['universe']
+        contexts = meta[1]
+
+        assets = []
+        for i, asset in enumerate(universe):
+            ctx = contexts[i]
+            name = asset['name']
+            funding = float(ctx.get('funding', 0))
+            mark_px = float(ctx.get('markPx', 0))
+            oi = float(ctx.get('openInterest', 0))
+            volume = float(ctx.get('dayNtlVlm', 0))
+
+            if volume >= min_volume:
+                assets.append({
+                    'name': name,
+                    'price': mark_px,
+                    'funding_hr': funding * 100,
+                    'funding_apr': funding * 24 * 365 * 100,
+                    'oi': oi,
+                    'volume': volume
+                })
+
+        print(f"\nTotal perps: {len(universe)} | With sufficient volume: {len(assets)}")
+
+        assets_by_funding = sorted(assets, key=lambda x: x['funding_apr'])
+
+        print(f"\n{Colors.BOLD}{Colors.GREEN}TOP {top_n} NEGATIVE FUNDING (shorts paying longs - LONG opportunities):{Colors.END}")
+        print(f"{'Asset':<12} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'Open Interest':>15} {'24h Volume':>15}")
+        print("-" * 80)
+
+        for a in assets_by_funding[:top_n]:
+            funding_color = Colors.GREEN if a['funding_apr'] < -50 else Colors.YELLOW if a['funding_apr'] < 0 else Colors.END
+            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
+
+        print(f"\n{Colors.BOLD}{Colors.RED}TOP {top_n} POSITIVE FUNDING (longs paying shorts - SHORT opportunities or avoid):{Colors.END}")
+        print(f"{'Asset':<12} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'Open Interest':>15} {'24h Volume':>15}")
+        print("-" * 80)
+
+        for a in assets_by_funding[-top_n:][::-1]:
+            funding_color = Colors.RED if a['funding_apr'] > 50 else Colors.YELLOW if a['funding_apr'] > 0 else Colors.END
+            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
+
+        # High volume movers
+        assets_by_volume = sorted(assets, key=lambda x: x['volume'], reverse=True)[:10]
+        print(f"\n{Colors.BOLD}{Colors.BLUE}TOP 10 BY VOLUME (most liquid):{Colors.END}")
+        print(f"{'Asset':<12} {'Price':>12} {'Funding APR':>12} {'24h Volume':>15}")
+        print("-" * 55)
+        for a in assets_by_volume:
+            funding_color = Colors.GREEN if a['funding_apr'] < -10 else Colors.RED if a['funding_apr'] > 10 else Colors.YELLOW
+            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_apr']:>11.1f}%{Colors.END} ${a['volume']:>13,.0f}")
+
+        # HIP-3 Equity Perps
+        print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 PERPS (trade.xyz - equities, commodities, forex):{Colors.END}")
+        print(f"{'Asset':<14} {'Price':>12} {'Funding/hr':>12} {'APR':>10}")
+        print("-" * 50)
+
+        import requests as req
+
+        try:
+            hip3_meta = info.meta(dex='xyz')
+            hip3_universe = hip3_meta.get('universe', [])
+            hip3_assets = [a.get('name', '') for a in hip3_universe if a.get('name')]
+        except Exception:
+            hip3_assets = [
+                'xyz:TSLA', 'xyz:NVDA', 'xyz:AAPL', 'xyz:GOOGL', 'xyz:AMZN',
+                'xyz:META', 'xyz:MSFT', 'xyz:HOOD', 'xyz:PLTR', 'xyz:MSTR',
+                'xyz:AMD', 'xyz:NFLX', 'xyz:COIN', 'xyz:XYZ100',
+                'xyz:GOLD', 'xyz:SILVER', 'xyz:COPPER', 'xyz:NATGAS',
+            ]
+
+        hip3_data = []
+        for coin in hip3_assets:
+            try:
+                resp = req.post(
+                    config['api_url'] + "/info",
+                    json={"type": "fundingHistory", "coin": coin, "startTime": 0},
+                    timeout=5
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data:
+                        latest = data[-1]
+                        funding = float(latest.get('fundingRate', 0))
+
+                        book_resp = req.post(
+                            config['api_url'] + "/info",
+                            json={"type": "l2Book", "coin": coin},
+                            timeout=5
+                        )
+                        price = 0
+                        if book_resp.status_code == 200:
+                            book = book_resp.json()
+                            levels = book.get('levels', [])
+                            if len(levels) >= 2 and levels[0] and levels[1]:
+                                price = (float(levels[0][0]['px']) + float(levels[1][0]['px'])) / 2
+
+                        funding_hr = funding * 100
+                        funding_apr = funding * 24 * 365 * 100
+                        hip3_data.append({
+                            'name': coin,
+                            'price': price,
+                            'funding_hr': funding_hr,
+                            'funding_apr': funding_apr
+                        })
+
+                        funding_color = Colors.GREEN if funding_apr < -10 else Colors.RED if funding_apr > 10 else Colors.YELLOW
+                        print(f"{coin:<14} ${price:>10,.2f} {funding_color}{funding_hr:>11.4f}%{Colors.END} {funding_apr:>9.1f}%")
+            except Exception:
+                pass
+
+        print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+        negative_funding = [a for a in assets if a['funding_apr'] < -20]
+        print(f"  Native perps with funding < -20% APR: {len(negative_funding)}")
+        if negative_funding:
+            best = min(negative_funding, key=lambda x: x['funding_apr'])
+            print(f"  Best native opportunity: {best['name']} at {best['funding_apr']:.1f}% APR (${best['volume']:,.0f} vol)")
+
+        if hip3_data:
+            best_hip3 = min(hip3_data, key=lambda x: x['funding_apr'])
+            print(f"  Best HIP-3 opportunity: {best_hip3['name']} at {best_hip3['funding_apr']:.1f}% APR")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error scanning: {e}{Colors.END}")
+        import traceback
+        traceback.print_exc()
+
+
+def cmd_hip3(args):
+    """Get detailed data for HIP-3 perps."""
+    info, config = setup_info()
+    import requests as req
+
+    if not args.coin:
+        try:
+            meta = info.meta(dex='xyz')
+            universe = meta.get('universe', [])
+            assets = sorted([a.get('name', '') for a in universe if a.get('name')])
+        except Exception:
+            assets = [
+                'xyz:TSLA', 'xyz:NVDA', 'xyz:AAPL', 'xyz:GOOGL', 'xyz:AMZN',
+                'xyz:META', 'xyz:MSFT', 'xyz:HOOD', 'xyz:PLTR', 'xyz:MSTR',
+                'xyz:AMD', 'xyz:NFLX', 'xyz:COIN', 'xyz:XYZ100',
+                'xyz:GOLD', 'xyz:SILVER', 'xyz:COPPER', 'xyz:NATGAS',
+            ]
+    else:
+        coin = args.coin if args.coin.startswith('xyz:') else f'xyz:{args.coin}'
+        assets = [coin]
+
+    print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 EQUITY PERPS DATA{Colors.END}")
+    print("=" * 80)
+
+    for coin in assets:
+        try:
+            print(f"\n{Colors.BOLD}{coin}{Colors.END}")
+
+            book_resp = req.post(
+                config['api_url'] + "/info",
+                json={"type": "l2Book", "coin": coin},
+                timeout=10
+            )
+
+            if book_resp.status_code == 200:
+                book = book_resp.json()
+                levels = book.get('levels', [])
+
+                if len(levels) >= 2 and levels[0] and levels[1]:
+                    best_bid = float(levels[0][0]['px'])
+                    best_ask = float(levels[1][0]['px'])
+                    mid = (best_bid + best_ask) / 2
+                    spread = best_ask - best_bid
+                    spread_bps = (spread / mid) * 10000
+
+                    bid_depth = sum(float(b['sz']) * float(b['px']) for b in levels[0][:5])
+                    ask_depth = sum(float(a['sz']) * float(a['px']) for a in levels[1][:5])
+
+                    print(f"  Price:       ${mid:,.2f}")
+                    print(f"  Bid:         ${best_bid:,.2f}")
+                    print(f"  Ask:         ${best_ask:,.2f}")
+                    print(f"  Spread:      {spread_bps:.1f} bps (${spread:.2f})")
+                    print(f"  Bid Depth:   ${bid_depth:,.0f} (top 5 levels)")
+                    print(f"  Ask Depth:   ${ask_depth:,.0f} (top 5 levels)")
+
+            funding_resp = req.post(
+                config['api_url'] + "/info",
+                json={"type": "fundingHistory", "coin": coin, "startTime": 0},
+                timeout=10
+            )
+
+            if funding_resp.status_code == 200:
+                data = funding_resp.json()
+                if data:
+                    latest = data[-1]
+                    funding = float(latest.get('fundingRate', 0))
+                    funding_hr = funding * 100
+                    funding_apr = funding * 24 * 365 * 100
+
+                    funding_color = Colors.GREEN if funding < 0 else Colors.RED if funding > 0.0001 else Colors.YELLOW
+                    signal = "shorts paying longs" if funding < 0 else "longs paying shorts" if funding > 0 else "neutral"
+
+                    print(f"  Funding:     {funding_color}{funding_hr:.4f}%/hr ({funding_apr:.1f}% APR){Colors.END}")
+                    print(f"  Signal:      {signal}")
+
+        except Exception as e:
+            print(f"  {Colors.RED}Error: {e}{Colors.END}")
+
+
+def cmd_dexes(args):
+    """List all HIP-3 dexes and their assets."""
+    base_info, config = setup_info(require_credentials=False, include_hip3=False)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}HIP-3 DEXES{Colors.END}")
+    print("=" * 80)
+
+    try:
+        all_dexes = base_info.perp_dexs()
+
+        for dex_info in all_dexes:
+            if dex_info is None:
+                continue
+
+            dex_name = dex_info.get('name', 'unknown')
+            full_name = dex_info.get('fullName', dex_name)
+
+            try:
+                meta = base_info.meta(dex=dex_name)
+                universe = meta.get('universe', [])
+                assets = sorted([a.get('name', '').replace(f'{dex_name}:', '') for a in universe if a.get('name')])
+                leverages = [a.get('maxLeverage', 0) for a in universe]
+            except Exception:
+                oi_caps = dex_info.get('assetToStreamingOiCap', [])
+                assets = sorted([a[0].split(':')[1] for a in oi_caps if a[0]])
+                leverages = []
+
+            print(f"\n{Colors.BOLD}{dex_name.upper()}{Colors.END} ({full_name})")
+
+            if assets:
+                print(f"Assets ({len(assets)}): {', '.join(assets)}")
+            else:
+                print(f"{Colors.DIM}No assets yet{Colors.END}")
+
+            if leverages:
+                print(f"Leverage: {min(leverages)}-{max(leverages)}x")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching dexes: {e}{Colors.END}")
+
+    print()
+
+
+def cmd_history(args):
+    """Show trade history from Hyperliquid API."""
+    info, config = setup_info(require_credentials=True)
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}TRADE HISTORY{Colors.END}")
+    print("=" * 80)
+
+    try:
+        fills = info.user_fills(config['account_address'])
+
+        if not fills:
+            print("No trades found.")
+            return
+
+        limit = args.limit if hasattr(args, 'limit') and args.limit else 20
+        recent = fills[-limit:]
+
+        print(f"{'Time':<18} {'Side':<6} {'Asset':<14} {'Size':>12} {'Price':>14} {'Value':>12}")
+        print("-" * 80)
+
+        for fill in reversed(recent):
+            ts = fill.get('time', 0)
+            dt = datetime.fromtimestamp(ts/1000).strftime('%Y-%m-%d %H:%M')
+            coin = fill.get('coin', '?')
+            side = fill.get('side', '?')
+            side_str = f"{Colors.GREEN}BUY{Colors.END}" if side == 'B' else f"{Colors.RED}SELL{Colors.END}"
+            sz = float(fill.get('sz', 0))
+            px = float(fill.get('px', 0))
+            value = sz * px
+
+            print(f"{dt:<18} {side_str:<15} {coin:<14} {sz:>12.4f} ${px:>13.4f} ${value:>11.2f}")
+
+        print(f"\n{Colors.DIM}Showing last {len(recent)} trades. Use --limit N for more.{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error: {e}{Colors.END}")
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='HyperClaw - Hyperliquid Trading CLI for AI Agents',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
+
+    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+
+    # Status commands
+    subparsers.add_parser('status', help='Account status and positions summary')
+    subparsers.add_parser('positions', help='Detailed position information')
+    subparsers.add_parser('orders', help='List open orders')
+
+    # Price/data commands
+    price_parser = subparsers.add_parser('price', help='Get current prices')
+    price_parser.add_argument('coins', nargs='*', help='Assets to get prices for')
+
+    funding_parser = subparsers.add_parser('funding', help='Get funding rates')
+    funding_parser.add_argument('coins', nargs='*', help='Assets to get funding for')
+
+    book_parser = subparsers.add_parser('book', help='Get order book')
+    book_parser.add_argument('coin', help='Asset to get order book for')
+
+    # Trading commands
+    buy_parser = subparsers.add_parser('buy', help='Market buy')
+    buy_parser.add_argument('coin', help='Asset to buy')
+    buy_parser.add_argument('size', type=float, help='Size to buy')
+
+    sell_parser = subparsers.add_parser('sell', help='Market sell')
+    sell_parser.add_argument('coin', help='Asset to sell')
+    sell_parser.add_argument('size', type=float, help='Size to sell')
+
+    limit_buy_parser = subparsers.add_parser('limit-buy', help='Limit buy order')
+    limit_buy_parser.add_argument('coin', help='Asset to buy')
+    limit_buy_parser.add_argument('size', type=float, help='Size to buy')
+    limit_buy_parser.add_argument('price', type=float, help='Limit price')
+
+    limit_sell_parser = subparsers.add_parser('limit-sell', help='Limit sell order')
+    limit_sell_parser.add_argument('coin', help='Asset to sell')
+    limit_sell_parser.add_argument('size', type=float, help='Size to sell')
+    limit_sell_parser.add_argument('price', type=float, help='Limit price')
+
+    sl_parser = subparsers.add_parser('stop-loss', help='Place stop-loss trigger order')
+    sl_parser.add_argument('coin', help='Asset')
+    sl_parser.add_argument('size', type=float, help='Size to close')
+    sl_parser.add_argument('trigger_price', type=float, help='Trigger price')
+    sl_parser.add_argument('--buy', action='store_true', help='Force buy side (for closing shorts)')
+
+    tp_parser = subparsers.add_parser('take-profit', help='Place take-profit trigger order')
+    tp_parser.add_argument('coin', help='Asset')
+    tp_parser.add_argument('size', type=float, help='Size to close')
+    tp_parser.add_argument('trigger_price', type=float, help='Trigger price')
+    tp_parser.add_argument('--buy', action='store_true', help='Force buy side (for closing shorts)')
+
+    close_parser = subparsers.add_parser('close', help='Close position')
+    close_parser.add_argument('coin', help='Asset to close')
+
+    cancel_parser = subparsers.add_parser('cancel', help='Cancel order')
+    cancel_parser.add_argument('oid', help='Order ID to cancel')
+
+    subparsers.add_parser('cancel-all', help='Cancel all open orders')
+
+    # Analysis commands
+    analyze_parser = subparsers.add_parser('analyze', help='Comprehensive analysis')
+    analyze_parser.add_argument('coins', nargs='*', help='Assets to analyze')
+
+    raw_parser = subparsers.add_parser('raw', help='Dump raw JSON data')
+    raw_parser.add_argument('coin', help='Asset to dump data for')
+
+    scan_parser = subparsers.add_parser('scan', help='Scan ALL assets for opportunities')
+    scan_parser.add_argument('--min-volume', type=float, default=100000, help='Min 24h volume (default: 100000)')
+    scan_parser.add_argument('--top', type=int, default=20, help='Top results (default: 20)')
+
+    hip3_parser = subparsers.add_parser('hip3', help='HIP-3 equity perp data')
+    hip3_parser.add_argument('coin', nargs='?', help='HIP-3 asset (e.g., META, TSLA)')
+
+    subparsers.add_parser('dexes', help='List all HIP-3 dexes and assets')
+
+    history_parser = subparsers.add_parser('history', help='Trade history')
+    history_parser.add_argument('--limit', type=int, default=20, help='Number of trades (default: 20)')
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        return
+
+    commands = {
+        'status': cmd_status,
+        'positions': cmd_positions,
+        'orders': cmd_orders,
+        'price': cmd_price,
+        'funding': cmd_funding,
+        'book': cmd_book,
+        'buy': cmd_buy,
+        'sell': cmd_sell,
+        'limit-buy': cmd_limit_buy,
+        'limit-sell': cmd_limit_sell,
+        'stop-loss': cmd_stop_loss,
+        'take-profit': cmd_take_profit,
+        'close': cmd_close,
+        'cancel': cmd_cancel,
+        'cancel-all': cmd_cancel_all,
+        'analyze': cmd_analyze,
+        'raw': cmd_raw,
+        'scan': cmd_scan,
+        'hip3': cmd_hip3,
+        'dexes': cmd_dexes,
+        'history': cmd_history,
+    }
+
+    if args.command in commands:
+        commands[args.command](args)
+    else:
+        parser.print_help()
+
+
+if __name__ == '__main__':
+    main()
