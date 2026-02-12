@@ -16,10 +16,15 @@ Usage:
     python hl.py orders              # List open orders
     python hl.py cancel ORDER_ID     # Cancel order
     python hl.py cancel-all          # Cancel all orders
+    python hl.py candles BTC          # Historical OHLCV candles
     python hl.py scan                # Scan all perps for opportunities
     python hl.py hip3                # HIP-3 equity perp data
     python hl.py dexes               # List all HIP-3 dexes
     python hl.py history             # Trade history
+    python hl.py leverage SOL 5      # Set leverage
+    python hl.py margin xyz:TSLA 10  # Add margin to isolated position
+    python hl.py modify-order 123 --price 130  # Modify order
+    python hl.py schedule-cancel 60  # Auto-cancel orders in 60min
 """
 
 import os
@@ -763,6 +768,68 @@ def cmd_cancel(args):
         print(f"{Colors.RED}Error canceling order: {e}{Colors.END}")
 
 
+def cmd_candles(args):
+    """Get historical OHLCV candles for an asset."""
+    info, config = setup_info()
+    coin = args.coin
+    interval = args.interval
+    count = args.count
+
+    print(f"\n{Colors.BOLD}{coin} Candles ({interval}){Colors.END}")
+    print("=" * 80)
+
+    try:
+        import time as _time
+        end_time = int(_time.time() * 1000)
+        # Estimate start time based on interval and count
+        interval_ms = {
+            '1m': 60000, '5m': 300000, '15m': 900000, '1h': 3600000,
+            '4h': 14400000, '1d': 86400000,
+        }
+        ms = interval_ms.get(interval, 3600000)
+        start_time = end_time - (ms * count)
+
+        candles = info.candles_snapshot(coin, interval, start_time, end_time)
+
+        if not candles:
+            print(f"{Colors.DIM}No candle data available{Colors.END}")
+            return
+
+        # Show most recent candles
+        recent = candles[-count:]
+
+        print(f"  {'Time':<18} {'Open':>12} {'High':>12} {'Low':>12} {'Close':>12} {'Volume':>14} {'Change':>8}")
+        print("  " + "-" * 90)
+
+        for c in recent:
+            ts = datetime.fromtimestamp(c['t'] / 1000).strftime('%Y-%m-%d %H:%M')
+            o = float(c['o'])
+            h = float(c['h'])
+            l = float(c['l'])
+            close = float(c['c'])
+            vol = float(c['v'])
+            change = ((close - o) / o) * 100 if o > 0 else 0
+            change_color = Colors.GREEN if change >= 0 else Colors.RED
+
+            print(f"  {ts:<18} {format_price(o):>12} {format_price(h):>12} {format_price(l):>12} {format_price(close):>12} ${vol:>13,.0f} {change_color}{change:>+7.2f}%{Colors.END}")
+
+        # Summary
+        if len(recent) >= 2:
+            first_open = float(recent[0]['o'])
+            last_close = float(recent[-1]['c'])
+            total_change = ((last_close - first_open) / first_open) * 100 if first_open > 0 else 0
+            high = max(float(c['h']) for c in recent)
+            low = min(float(c['l']) for c in recent)
+            total_vol = sum(float(c['v']) for c in recent)
+            change_color = Colors.GREEN if total_change >= 0 else Colors.RED
+
+            print(f"\n  Period: {format_price(first_open)} → {format_price(last_close)} ({change_color}{total_change:+.2f}%{Colors.END})")
+            print(f"  Range: {format_price(low)} - {format_price(high)} | Total Volume: ${total_vol:,.0f}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching candles: {e}{Colors.END}")
+
+
 def cmd_leverage(args):
     """Set leverage for an asset."""
     exchange, info, config = setup_exchange()
@@ -806,6 +873,117 @@ def cmd_leverage(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error setting leverage: {e}{Colors.END}")
+
+
+def cmd_margin(args):
+    """Add or remove margin from an isolated position."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    amount = args.amount
+
+    action = "Adding" if amount > 0 else "Removing"
+    print(f"\n{Colors.BOLD}{action} ${abs(amount):.2f} margin on {coin}{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        result = exchange.update_isolated_margin(amount, coin)
+
+        if result.get('status') == 'ok':
+            print(f"\n{Colors.GREEN}Margin updated! {action} ${abs(amount):.2f} on {coin}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error updating margin: {e}{Colors.END}")
+
+
+def cmd_modify_order(args):
+    """Modify an existing order's price and/or size."""
+    exchange, info, config = setup_exchange()
+    oid = int(args.oid)
+    new_price = args.price
+    new_size = args.size
+
+    print(f"\n{Colors.BOLD}Modify Order {oid}{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        # Find the existing order to get its details
+        open_orders = info.open_orders(config['account_address'])
+
+        order = None
+        for o in open_orders:
+            if o.get('oid') == oid:
+                order = o
+                break
+
+        if not order:
+            print(f"{Colors.YELLOW}Order {oid} not found in open orders{Colors.END}")
+            return
+
+        coin = order.get('coin')
+        is_buy = order.get('side') == 'B'
+        current_sz = float(order.get('sz', 0))
+        current_px = float(order.get('limitPx', 0))
+
+        sz = new_size if new_size is not None else current_sz
+        px = new_price if new_price is not None else current_px
+
+        print(f"  Asset: {coin}")
+        print(f"  Side: {'BUY' if is_buy else 'SELL'}")
+        print(f"  Size: {current_sz} → {sz}")
+        print(f"  Price: {format_price(current_px)} → {format_price(px)}")
+
+        result = exchange.modify_order(oid, coin, is_buy, sz, px, {"limit": {"tif": "Gtc"}})
+
+        if result.get('status') == 'ok':
+            print(f"\n{Colors.GREEN}Order modified!{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error modifying order: {e}{Colors.END}")
+
+
+def cmd_schedule_cancel(args):
+    """Schedule auto-cancel of all orders (dead man's switch)."""
+    exchange, info, config = setup_exchange()
+
+    if args.clear:
+        print(f"\n{Colors.BOLD}Clearing scheduled cancel{Colors.END}")
+        try:
+            result = exchange.schedule_cancel(None)
+            if result.get('status') == 'ok':
+                print(f"{Colors.GREEN}Scheduled cancel cleared!{Colors.END}")
+            else:
+                print(f"{Colors.RED}Failed: {result}{Colors.END}")
+        except Exception as e:
+            print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return
+
+    minutes = args.minutes
+
+    print(f"\n{Colors.BOLD}Schedule Cancel: all orders in {minutes} minutes{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+
+    try:
+        import time as _time
+        cancel_time = int(_time.time() * 1000) + (minutes * 60 * 1000)
+        cancel_dt = datetime.fromtimestamp(cancel_time / 1000).strftime('%Y-%m-%d %H:%M:%S')
+
+        result = exchange.schedule_cancel(cancel_time)
+
+        if result.get('status') == 'ok':
+            print(f"\n{Colors.GREEN}Scheduled! All orders will be canceled at {cancel_dt}{Colors.END}")
+            print(f"{Colors.DIM}Max 10 triggers per day. Use --clear to unset.{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error scheduling cancel: {e}{Colors.END}")
 
 
 def cmd_cancel_all(args):
@@ -1398,6 +1576,24 @@ def main():
     leverage_parser.add_argument('coin', help='Asset (e.g., SOL, xyz:TSLA)')
     leverage_parser.add_argument('leverage', type=int, help='Leverage multiplier (1 to max)')
 
+    margin_parser = subparsers.add_parser('margin', help='Add/remove margin on isolated position')
+    margin_parser.add_argument('coin', help='Asset (e.g., xyz:TSLA)')
+    margin_parser.add_argument('amount', type=float, help='USD amount (positive=add, negative=remove)')
+
+    modify_parser = subparsers.add_parser('modify-order', help='Modify existing order')
+    modify_parser.add_argument('oid', help='Order ID to modify')
+    modify_parser.add_argument('--price', type=float, help='New price')
+    modify_parser.add_argument('--size', type=float, help='New size')
+
+    schedule_parser = subparsers.add_parser('schedule-cancel', help='Auto-cancel all orders after N minutes')
+    schedule_parser.add_argument('minutes', type=int, nargs='?', default=30, help='Minutes until cancel (default: 30)')
+    schedule_parser.add_argument('--clear', action='store_true', help='Clear scheduled cancel')
+
+    candles_parser = subparsers.add_parser('candles', help='Historical OHLCV candles')
+    candles_parser.add_argument('coin', help='Asset (e.g., BTC, xyz:TSLA)')
+    candles_parser.add_argument('--interval', default='1h', help='Interval: 1m, 5m, 15m, 1h, 4h, 1d (default: 1h)')
+    candles_parser.add_argument('--count', type=int, default=24, help='Number of candles (default: 24)')
+
     # Analysis commands
     analyze_parser = subparsers.add_parser('analyze', help='Comprehensive analysis')
     analyze_parser.add_argument('coins', nargs='*', help='Assets to analyze')
@@ -1440,6 +1636,10 @@ def main():
         'cancel': cmd_cancel,
         'cancel-all': cmd_cancel_all,
         'leverage': cmd_leverage,
+        'margin': cmd_margin,
+        'modify-order': cmd_modify_order,
+        'schedule-cancel': cmd_schedule_cancel,
+        'candles': cmd_candles,
         'analyze': cmd_analyze,
         'raw': cmd_raw,
         'scan': cmd_scan,

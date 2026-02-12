@@ -55,6 +55,7 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `price [COINS...]` | Current prices | `hl.py price BTC ETH SOL` |
 | `funding [COINS...]` | Funding rates (hourly + APR) | `hl.py funding BTC SOL DOGE` |
 | `book COIN` | L2 order book with spread | `hl.py book SOL` |
+| `candles COIN` | Historical OHLCV price candles | `hl.py candles BTC --interval 1d --count 30` |
 | `scan` | Scan ALL 228+ perps for opportunities | `hl.py scan --top 30 --min-volume 1000000` |
 | `analyze [COINS...]` | Comprehensive market data dump | `hl.py analyze BTC ETH SOL` |
 | `raw COIN` | Raw JSON data for processing | `hl.py raw BTC` |
@@ -81,6 +82,9 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `cancel OID` | Cancel specific order | `hl.py cancel 12345` |
 | `cancel-all` | Cancel all open orders | `hl.py cancel-all` |
 | `leverage COIN LEV` | Set leverage (1 to max) | `hl.py leverage xyz:TSLA 3` |
+| `margin COIN AMOUNT` | Add/remove margin on isolated position | `hl.py margin xyz:TSLA 10` |
+| `modify-order OID` | Modify existing order price/size | `hl.py modify-order 123 --price 130` |
+| `schedule-cancel [MIN]` | Dead man's switch - auto-cancel orders | `hl.py schedule-cancel 60` |
 
 ### HIP-3 Trading
 
