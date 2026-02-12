@@ -392,11 +392,11 @@ def cmd_book(args):
 
 
 def cmd_orders(args):
-    """List open orders."""
+    """List open orders with trigger/TP/SL details."""
     info, config = setup_info(require_credentials=True)
 
     try:
-        open_orders = info.open_orders(config['account_address'])
+        open_orders = info.frontend_open_orders(config['account_address'])
 
         print(f"\n{Colors.BOLD}Open Orders:{Colors.END}")
 
@@ -404,8 +404,8 @@ def cmd_orders(args):
             print(f"  {Colors.DIM}No open orders{Colors.END}")
             return
 
-        print(f"  {'OID':<12} {'Asset':<12} {'Side':<6} {'Size':>12} {'Price':>12} {'Type':<10}")
-        print("  " + "-" * 70)
+        print(f"  {'OID':<12} {'Asset':<12} {'Side':<6} {'Size':>10} {'Price':>12} {'Type':<12} {'Details'}")
+        print("  " + "-" * 85)
 
         for order in open_orders:
             oid = order.get('oid', 'N/A')
@@ -414,9 +414,35 @@ def cmd_orders(args):
             side_color = Colors.GREEN if side == "BUY" else Colors.RED
             sz = order.get('sz', '0')
             px = float(order.get('limitPx', 0))
-            order_type = order.get('orderType', 'limit')
+            order_type = order.get('orderType', 'Limit')
+            is_tpsl = order.get('isPositionTpsl', False)
+            reduce_only = order.get('reduceOnly', False)
+            trigger_px = order.get('triggerPx', '')
+            trigger_cond = order.get('triggerCondition', '')
 
-            print(f"  {oid:<12} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>12} {format_price(px):>12} {order_type:<10}")
+            details = []
+            if is_tpsl:
+                details.append("TP/SL")
+            if reduce_only:
+                details.append("reduce-only")
+            if trigger_px:
+                details.append(f"trigger:{trigger_px}")
+            if trigger_cond:
+                details.append(trigger_cond)
+            detail_str = " | ".join(details) if details else ""
+
+            print(f"  {oid:<12} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>10} {format_price(px):>12} {order_type:<12} {detail_str}")
+
+            # Show child orders (attached TP/SL)
+            children = order.get('children', [])
+            for child in children:
+                c_oid = child.get('oid', '')
+                c_side = "BUY" if child.get('side') == 'B' else "SELL"
+                c_sz = child.get('sz', '')
+                c_px = float(child.get('limitPx', 0))
+                c_type = child.get('orderType', '')
+                c_trigger = child.get('triggerPx', '')
+                print(f"  {'  └─':<12} {'':<12} {c_side:<6} {c_sz:>10} {format_price(c_px):>12} {c_type:<12} trigger:{c_trigger}")
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching orders: {e}{Colors.END}")
@@ -1138,6 +1164,215 @@ def cmd_cancel_all(args):
 
 
 # ============================================================================
+# DATA COMMANDS
+# ============================================================================
+
+def cmd_predicted_fundings(args):
+    """Get predicted next funding rates across venues."""
+    info, config = setup_info()
+    import requests as req
+
+    coins = args.coins if args.coins else None
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}PREDICTED FUNDING RATES{Colors.END}")
+    print(f"Cross-venue: Hyperliquid, Binance, Bybit")
+    print("=" * 90)
+
+    try:
+        resp = req.post(config['api_url'] + "/info", json={"type": "predictedFundings"}, timeout=10)
+        if resp.status_code != 200:
+            print(f"{Colors.RED}API error: {resp.status_code}{Colors.END}")
+            return
+
+        data = resp.json()
+
+        print(f"\n  {'Asset':<12} {'HL Pred':>12} {'HL APR':>10} {'Binance':>12} {'Bybit':>12} {'HL vs Bin':>10}")
+        print("  " + "-" * 70)
+
+        for item in data:
+            name = item[0] if isinstance(item, list) else item
+            venues = item[1] if isinstance(item, list) else []
+
+            if coins and name not in coins:
+                continue
+
+            hl_rate = bin_rate = bybit_rate = None
+            for venue_name, venue_data in venues:
+                rate = float(venue_data.get('fundingRate', 0))
+                interval = venue_data.get('fundingIntervalHours', 1)
+                # Normalize to hourly
+                hourly = rate / interval if interval > 1 else rate
+                if 'Hl' in venue_name:
+                    hl_rate = hourly
+                elif 'Bin' in venue_name:
+                    bin_rate = hourly
+                elif 'Bybit' in venue_name:
+                    bybit_rate = hourly
+
+            if hl_rate is None:
+                continue
+
+            hl_apr = hl_rate * 24 * 365 * 100
+            hl_str = f"{hl_rate*100:>11.4f}%"
+            apr_str = f"{hl_apr:>9.1f}%"
+            bin_str = f"{bin_rate*100:>11.4f}%" if bin_rate is not None else f"{'N/A':>12}"
+            bybit_str = f"{bybit_rate*100:>11.4f}%" if bybit_rate is not None else f"{'N/A':>12}"
+
+            # Divergence between HL and Binance
+            div_str = ""
+            if hl_rate is not None and bin_rate is not None:
+                div = (hl_rate - bin_rate) * 100
+                div_color = Colors.GREEN if div < -0.001 else Colors.RED if div > 0.001 else Colors.YELLOW
+                div_str = f"{div_color}{div:>+9.4f}%{Colors.END}"
+
+            funding_color = Colors.GREEN if hl_apr < -20 else Colors.RED if hl_apr > 20 else Colors.YELLOW
+            print(f"  {name:<12} {funding_color}{hl_str}{Colors.END} {apr_str} {bin_str} {bybit_str} {div_str}")
+
+        if not coins:
+            print(f"\n{Colors.DIM}Showing all assets. Use: predicted-fundings BTC ETH SOL to filter.{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching predicted fundings: {e}{Colors.END}")
+
+
+def cmd_trades(args):
+    """Get recent trades for an asset."""
+    info, config = setup_info()
+    coin = args.coin
+    import requests as req
+
+    print(f"\n{Colors.BOLD}{coin} Recent Trades{Colors.END}")
+    print("=" * 80)
+
+    try:
+        resp = req.post(
+            config['api_url'] + "/info",
+            json={"type": "recentTrades", "coin": coin},
+            timeout=10
+        )
+        if resp.status_code != 200:
+            print(f"{Colors.RED}API error: {resp.status_code}{Colors.END}")
+            return
+
+        trades = resp.json()
+
+        if not trades:
+            print(f"{Colors.DIM}No recent trades{Colors.END}")
+            return
+
+        print(f"\n  {'Time':<20} {'Side':<6} {'Price':>14} {'Size':>14} {'Value':>14}")
+        print("  " + "-" * 70)
+
+        for t in trades:
+            ts = datetime.fromtimestamp(t['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            side = "BUY" if t['side'] == 'B' else "SELL"
+            side_color = Colors.GREEN if side == "BUY" else Colors.RED
+            px = float(t['px'])
+            sz = float(t['sz'])
+            value = px * sz
+
+            print(f"  {ts:<20} {side_color}{side:<6}{Colors.END} {format_price(px):>14} {sz:>14.6f} ${value:>13,.2f}")
+
+        # Summary
+        buys = [t for t in trades if t['side'] == 'B']
+        sells = [t for t in trades if t['side'] == 'A']
+        buy_vol = sum(float(t['sz']) * float(t['px']) for t in buys)
+        sell_vol = sum(float(t['sz']) * float(t['px']) for t in sells)
+        total_vol = buy_vol + sell_vol
+
+        print(f"\n  Trades: {len(trades)} | Buys: {len(buys)} | Sells: {len(sells)}")
+        print(f"  Buy vol: ${buy_vol:,.2f} | Sell vol: ${sell_vol:,.2f} | Ratio: {buy_vol/total_vol*100:.0f}/{sell_vol/total_vol*100:.0f}" if total_vol > 0 else "")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching trades: {e}{Colors.END}")
+
+
+def cmd_max_trade_size(args):
+    """Get maximum tradeable size for an asset."""
+    info, config = setup_info(require_credentials=True)
+    coin = args.coin
+    import requests as req
+
+    print(f"\n{Colors.BOLD}Max Trade Size: {coin}{Colors.END}")
+
+    try:
+        resp = req.post(
+            config['api_url'] + "/info",
+            json={"type": "activeAssetData", "user": config['account_address'], "coin": coin},
+            timeout=10
+        )
+        if resp.status_code != 200:
+            print(f"{Colors.RED}API error: {resp.status_code}{Colors.END}")
+            return
+
+        data = resp.json()
+
+        if not data:
+            print(f"{Colors.DIM}No data available{Colors.END}")
+            return
+
+        print(json.dumps(data, indent=2))
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching max trade size: {e}{Colors.END}")
+
+
+def cmd_user_funding(args):
+    """Show funding payments received/paid."""
+    info, config = setup_info(require_credentials=True)
+    days = args.days
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}FUNDING PAYMENTS (last {days} days){Colors.END}")
+    print("=" * 70)
+
+    try:
+        import time as _time
+        end_time = int(_time.time() * 1000)
+        start_time = end_time - (days * 86400 * 1000)
+
+        history = info.user_funding_history(config['account_address'], start_time, end_time)
+
+        if not history:
+            print(f"{Colors.DIM}No funding payments in this period{Colors.END}")
+            return
+
+        print(f"\n  {'Time':<18} {'Asset':<14} {'USD Amount':>14} {'Rate':>12}")
+        print("  " + "-" * 60)
+
+        totals = {}
+        for entry in history:
+            ts = entry.get('time', entry.get('startTime', 0))
+            dt = datetime.fromtimestamp(ts / 1000).strftime('%Y-%m-%d %H:%M')
+            coin = entry.get('coin', entry.get('asset', '?'))
+
+            # Parse the delta (USD amount of funding)
+            delta_str = entry.get('usdc', entry.get('delta', entry.get('nSamples', '0')))
+            delta = float(delta_str) if delta_str else 0
+            rate_str = entry.get('fundingRate', '0')
+            rate = float(rate_str) if rate_str else 0
+
+            if coin not in totals:
+                totals[coin] = 0
+            totals[coin] += delta
+
+            color = Colors.GREEN if delta >= 0 else Colors.RED
+            print(f"  {dt:<18} {coin:<14} {color}${delta:>+13.4f}{Colors.END} {rate*100:>11.4f}%")
+
+        # Totals by asset
+        if totals:
+            grand_total = sum(totals.values())
+            print(f"\n  {Colors.BOLD}Totals by asset:{Colors.END}")
+            for coin, total in sorted(totals.items(), key=lambda x: x[1]):
+                color = Colors.GREEN if total >= 0 else Colors.RED
+                print(f"    {coin:<14} {color}${total:>+.4f}{Colors.END}")
+            color = Colors.GREEN if grand_total >= 0 else Colors.RED
+            print(f"    {'TOTAL':<14} {color}${grand_total:>+.4f}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching user funding: {e}{Colors.END}")
+
+
+# ============================================================================
 # ANALYSIS COMMANDS
 # ============================================================================
 
@@ -1348,6 +1583,11 @@ def cmd_scan(args):
             oi = float(ctx.get('openInterest', 0))
             volume = float(ctx.get('dayNtlVlm', 0))
 
+            prev_day_px = float(ctx.get('prevDayPx', 0))
+            oracle_px = float(ctx.get('oraclePx', 0))
+            price_chg = ((mark_px - prev_day_px) / prev_day_px * 100) if prev_day_px > 0 else 0
+            oracle_div = ((mark_px - oracle_px) / oracle_px * 100) if oracle_px > 0 else 0
+
             if volume >= min_volume:
                 assets.append({
                     'name': name,
@@ -1355,28 +1595,47 @@ def cmd_scan(args):
                     'funding_hr': funding * 100,
                     'funding_apr': funding * 24 * 365 * 100,
                     'oi': oi,
-                    'volume': volume
+                    'volume': volume,
+                    'price_chg': price_chg,
+                    'oracle_px': oracle_px,
+                    'oracle_div': oracle_div,
                 })
 
         print(f"\nTotal perps: {len(universe)} | With sufficient volume: {len(assets)}")
 
         assets_by_funding = sorted(assets, key=lambda x: x['funding_apr'])
 
+        # Check OI-capped assets
+        import requests as req
+        oi_capped = set()
+        try:
+            resp = req.post(config['api_url'] + "/info", json={"type": "perpsAtOpenInterestCap"}, timeout=5)
+            if resp.status_code == 200:
+                oi_capped = set(resp.json())
+                if oi_capped:
+                    print(f"\n{Colors.YELLOW}OI-capped (new positions blocked): {', '.join(sorted(oi_capped))}{Colors.END}")
+        except Exception:
+            pass
+
         print(f"\n{Colors.BOLD}{Colors.GREEN}TOP {top_n} NEGATIVE FUNDING (shorts paying longs - LONG opportunities):{Colors.END}")
-        print(f"{'Asset':<12} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'Open Interest':>15} {'24h Volume':>15}")
-        print("-" * 80)
+        print(f"{'Asset':<12} {'Price':>12} {'24h Chg':>8} {'Funding/hr':>12} {'APR':>10} {'OI':>15} {'Volume':>15} {'Mk-Orc':>7}")
+        print("-" * 95)
 
         for a in assets_by_funding[:top_n]:
             funding_color = Colors.GREEN if a['funding_apr'] < -50 else Colors.YELLOW if a['funding_apr'] < 0 else Colors.END
-            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
+            chg_color = Colors.GREEN if a['price_chg'] >= 0 else Colors.RED
+            cap_flag = " OI!" if a['name'] in oi_capped else ""
+            print(f"{a['name']:<12} ${a['price']:>10,.2f} {chg_color}{a['price_chg']:>+7.1f}%{Colors.END} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f} {a['oracle_div']:>+6.2f}%{cap_flag}")
 
         print(f"\n{Colors.BOLD}{Colors.RED}TOP {top_n} POSITIVE FUNDING (longs paying shorts - SHORT opportunities or avoid):{Colors.END}")
-        print(f"{'Asset':<12} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'Open Interest':>15} {'24h Volume':>15}")
-        print("-" * 80)
+        print(f"{'Asset':<12} {'Price':>12} {'24h Chg':>8} {'Funding/hr':>12} {'APR':>10} {'OI':>15} {'Volume':>15} {'Mk-Orc':>7}")
+        print("-" * 95)
 
         for a in assets_by_funding[-top_n:][::-1]:
             funding_color = Colors.RED if a['funding_apr'] > 50 else Colors.YELLOW if a['funding_apr'] > 0 else Colors.END
-            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
+            chg_color = Colors.GREEN if a['price_chg'] >= 0 else Colors.RED
+            cap_flag = " OI!" if a['name'] in oi_capped else ""
+            print(f"{a['name']:<12} ${a['price']:>10,.2f} {chg_color}{a['price_chg']:>+7.1f}%{Colors.END} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f} {a['oracle_div']:>+6.2f}%{cap_flag}")
 
         # High volume movers
         assets_by_volume = sorted(assets, key=lambda x: x['volume'], reverse=True)[:10]
@@ -1718,6 +1977,18 @@ def main():
 
     subparsers.add_parser('portfolio', help='Account portfolio performance over time')
 
+    pf_parser = subparsers.add_parser('predicted-fundings', help='Predicted next funding rates (HL, Binance, Bybit)')
+    pf_parser.add_argument('coins', nargs='*', help='Filter to specific assets')
+
+    trades_parser = subparsers.add_parser('trades', help='Recent trades for an asset')
+    trades_parser.add_argument('coin', help='Asset (e.g., BTC, xyz:TSLA)')
+
+    mts_parser = subparsers.add_parser('max-trade-size', help='Max tradeable size for an asset')
+    mts_parser.add_argument('coin', help='Asset (e.g., SOL, xyz:TSLA)')
+
+    uf_parser = subparsers.add_parser('user-funding', help='Funding payments received/paid')
+    uf_parser.add_argument('--days', type=int, default=7, help='Number of days (default: 7)')
+
     # Analysis commands
     analyze_parser = subparsers.add_parser('analyze', help='Comprehensive analysis')
     analyze_parser.add_argument('coins', nargs='*', help='Assets to analyze')
@@ -1766,6 +2037,10 @@ def main():
         'candles': cmd_candles,
         'funding-history': cmd_funding_history,
         'portfolio': cmd_portfolio,
+        'predicted-fundings': cmd_predicted_fundings,
+        'trades': cmd_trades,
+        'max-trade-size': cmd_max_trade_size,
+        'user-funding': cmd_user_funding,
         'analyze': cmd_analyze,
         'raw': cmd_raw,
         'scan': cmd_scan,

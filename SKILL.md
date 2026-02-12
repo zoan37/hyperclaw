@@ -45,7 +45,8 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 |---------|-------------|---------|
 | `status` | Account balance, positions, PnL | `hl.py status` |
 | `positions` | Detailed position info (leverage, liquidation) | `hl.py positions` |
-| `orders` | List all open orders | `hl.py orders` |
+| `orders` | Open orders with TP/SL trigger details | `hl.py orders` |
+| `user-funding` | Funding payments received/paid (USD) | `hl.py user-funding --days 7` |
 | `history` | Trade history from API | `hl.py history --limit 50` |
 | `portfolio` | Account value and PnL over time | `hl.py portfolio` |
 
@@ -58,8 +59,11 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `book COIN` | L2 order book with spread | `hl.py book SOL` |
 | `candles COIN` | Historical OHLCV price candles | `hl.py candles BTC --interval 1d --count 30` |
 | `funding-history COIN` | Funding rate history with trend | `hl.py funding-history SOL --days 7` |
-| `scan` | Scan ALL 228+ perps for opportunities | `hl.py scan --top 30 --min-volume 1000000` |
+| `scan` | Scan all perps (funding, 24h change, OI, oracle divergence, OI caps) | `hl.py scan --top 30 --min-volume 1000000` |
 | `analyze [COINS...]` | Comprehensive market data dump | `hl.py analyze BTC ETH SOL` |
+| `predicted-fundings [COINS]` | Predicted next funding (HL, Binance, Bybit) | `hl.py predicted-fundings BTC ETH` |
+| `trades COIN` | Recent trades with buy/sell flow | `hl.py trades BTC` |
+| `max-trade-size COIN` | Available margin to trade per direction | `hl.py max-trade-size SOL` |
 | `raw COIN` | Raw JSON data for processing | `hl.py raw BTC` |
 
 ### HIP-3 (Equity/Commodity Perps)
