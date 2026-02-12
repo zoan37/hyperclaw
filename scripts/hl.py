@@ -1609,10 +1609,9 @@ def cmd_historical_orders(args):
 
 def cmd_analyze(args):
     """Comprehensive market analysis with raw data."""
-    info, config = setup_info(require_credentials=False)
+    info, config = setup_info(require_credentials=False, include_hip3=False)
 
     default_assets = ['BTC', 'ETH', 'SOL', 'DOGE', 'HYPE']
-    xyz_assets = ['xyz:TSLA', 'xyz:NVDA', 'xyz:AAPL']
     coins = args.coins if args.coins else default_assets
 
     print(f"\n{Colors.BOLD}{Colors.CYAN}COMPREHENSIVE MARKET ANALYSIS{Colors.END}")
@@ -1678,40 +1677,27 @@ def cmd_analyze(args):
                 funding_apr = funding * 24 * 365 * 100
                 print(f"{coin:<10} ${price:>10,.2f} {funding_pct:>11.4f}% {funding_apr:>11.1f}% ${oi:>13,.0f} ${vol:>13,.0f}")
 
-        # HIP-3 Equity Perps
-        print(f"\n{Colors.BOLD}=== HIP-3 EQUITY PERPS (trade.xyz) ==={Colors.END}")
-        import requests
-        for xyz_coin in xyz_assets:
-            try:
-                resp = requests.post(
-                    config['api_url'] + "/info",
-                    json={"type": "fundingHistory", "coin": xyz_coin, "startTime": 0},
-                    timeout=10
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data:
-                        latest = data[-1]
-                        funding = float(latest.get('fundingRate', 0))
-                        funding_pct = funding * 100
-                        funding_apr = funding * 24 * 365 * 100
-
-                        book_resp = requests.post(
-                            config['api_url'] + "/info",
-                            json={"type": "l2Book", "coin": xyz_coin},
-                            timeout=10
-                        )
-                        price = 0
-                        if book_resp.status_code == 200:
-                            book = book_resp.json()
-                            levels = book.get('levels', [])
-                            if len(levels) >= 2 and levels[0] and levels[1]:
-                                mid = (float(levels[0][0]['px']) + float(levels[1][0]['px'])) / 2
-                                price = mid
-
-                        print(f"{xyz_coin:<12} ${price:>10,.2f} | Funding: {funding_pct:.4f}%/hr ({funding_apr:.1f}% APR)")
-            except Exception as e:
-                print(f"{xyz_coin:<12} Error: {e}")
+        # HIP-3 Equity Perps (bulk fetch)
+        print(f"\n{Colors.BOLD}=== HIP-3 EQUITY PERPS ==={Colors.END}")
+        try:
+            dex_meta = info.post("/info", {"type": "metaAndAssetCtxs", "dex": "xyz"})
+            if dex_meta and len(dex_meta) >= 2:
+                dex_universe = dex_meta[0].get('universe', [])
+                dex_ctxs = dex_meta[1]
+                for i, asset in enumerate(dex_universe):
+                    ctx = dex_ctxs[i]
+                    name = asset.get('name', '')
+                    if not name:
+                        continue
+                    price = float(ctx.get('markPx', 0))
+                    funding = float(ctx.get('funding', 0))
+                    oi = float(ctx.get('openInterest', 0))
+                    vol = float(ctx.get('dayNtlVlm', 0))
+                    funding_pct = funding * 100
+                    funding_apr = funding * 24 * 365 * 100
+                    print(f"{name:<14} ${price:>10,.2f} | Funding: {funding_pct:.4f}%/hr ({funding_apr:.1f}% APR) | OI: ${oi:,.0f} | Vol: ${vol:,.0f}")
+        except Exception as e:
+            print(f"Error fetching HIP-3 data: {e}")
 
         # Order Book Summary
         print(f"\n{Colors.BOLD}=== ORDER BOOK SUMMARY ==={Colors.END}")
@@ -1790,7 +1776,7 @@ def cmd_raw(args):
 
 def cmd_scan(args):
     """Scan all assets for trading opportunities based on funding rates."""
-    info, config = setup_info()
+    info, config = setup_info(include_hip3=False)
 
     min_volume = args.min_volume if hasattr(args, 'min_volume') and args.min_volume else 100000
     top_n = args.top if hasattr(args, 'top') and args.top else 20
@@ -1877,64 +1863,53 @@ def cmd_scan(args):
             funding_color = Colors.GREEN if a['funding_apr'] < -10 else Colors.RED if a['funding_apr'] > 10 else Colors.YELLOW
             print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_apr']:>11.1f}%{Colors.END} ${a['volume']:>13,.0f}")
 
-        # HIP-3 Equity Perps
-        print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 PERPS (trade.xyz - equities, commodities, forex):{Colors.END}")
-        print(f"{'Asset':<14} {'Price':>12} {'Funding/hr':>12} {'APR':>10}")
-        print("-" * 50)
-
-        import requests as req
-
-        try:
-            hip3_meta = info.meta(dex='xyz')
-            hip3_universe = hip3_meta.get('universe', [])
-            hip3_assets = [a.get('name', '') for a in hip3_universe if a.get('name')]
-        except Exception:
-            hip3_assets = [
-                'xyz:TSLA', 'xyz:NVDA', 'xyz:AAPL', 'xyz:GOOGL', 'xyz:AMZN',
-                'xyz:META', 'xyz:MSFT', 'xyz:HOOD', 'xyz:PLTR', 'xyz:MSTR',
-                'xyz:AMD', 'xyz:NFLX', 'xyz:COIN', 'xyz:XYZ100',
-                'xyz:GOLD', 'xyz:SILVER', 'xyz:COPPER', 'xyz:NATGAS',
-            ]
+        # HIP-3 Equity Perps (bulk fetch - single API call per dex)
+        print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 PERPS (equities, commodities, forex):{Colors.END}")
+        print(f"{'Asset':<14} {'Price':>12} {'24h Chg':>8} {'Funding/hr':>12} {'APR':>10} {'OI':>15} {'Volume':>15}")
+        print("-" * 90)
 
         hip3_data = []
-        for coin in hip3_assets:
+        for dex_name in [d for d in get_all_dex_names(config['api_url']) if d]:
             try:
-                resp = req.post(
-                    config['api_url'] + "/info",
-                    json={"type": "fundingHistory", "coin": coin, "startTime": 0},
-                    timeout=5
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data:
-                        latest = data[-1]
-                        funding = float(latest.get('fundingRate', 0))
+                dex_meta = info.post("/info", {"type": "metaAndAssetCtxs", "dex": dex_name})
+                if not dex_meta or len(dex_meta) < 2:
+                    continue
+                dex_universe = dex_meta[0].get('universe', [])
+                dex_ctxs = dex_meta[1]
+                for i, asset in enumerate(dex_universe):
+                    ctx = dex_ctxs[i]
+                    name = asset.get('name', '')
+                    if not name:
+                        continue
+                    price = float(ctx.get('markPx', 0))
+                    funding = float(ctx.get('funding', 0))
+                    oi = float(ctx.get('openInterest', 0))
+                    volume = float(ctx.get('dayNtlVlm', 0))
+                    prev_day_px = float(ctx.get('prevDayPx', 0))
+                    price_chg = ((price - prev_day_px) / prev_day_px * 100) if prev_day_px > 0 else 0
 
-                        book_resp = req.post(
-                            config['api_url'] + "/info",
-                            json={"type": "l2Book", "coin": coin},
-                            timeout=5
-                        )
-                        price = 0
-                        if book_resp.status_code == 200:
-                            book = book_resp.json()
-                            levels = book.get('levels', [])
-                            if len(levels) >= 2 and levels[0] and levels[1]:
-                                price = (float(levels[0][0]['px']) + float(levels[1][0]['px'])) / 2
-
-                        funding_hr = funding * 100
-                        funding_apr = funding * 24 * 365 * 100
-                        hip3_data.append({
-                            'name': coin,
-                            'price': price,
-                            'funding_hr': funding_hr,
-                            'funding_apr': funding_apr
-                        })
-
-                        funding_color = Colors.GREEN if funding_apr < -10 else Colors.RED if funding_apr > 10 else Colors.YELLOW
-                        print(f"{coin:<14} ${price:>10,.2f} {funding_color}{funding_hr:>11.4f}%{Colors.END} {funding_apr:>9.1f}%")
+                    funding_hr = funding * 100
+                    funding_apr = funding * 24 * 365 * 100
+                    hip3_data.append({
+                        'name': name,
+                        'price': price,
+                        'funding_hr': funding_hr,
+                        'funding_apr': funding_apr,
+                        'oi': oi,
+                        'volume': volume,
+                        'price_chg': price_chg,
+                    })
             except Exception:
                 pass
+
+        hip3_active = [a for a in hip3_data if a['volume'] >= 100 or a['oi'] >= 100]
+        hip3_by_funding = sorted(hip3_active, key=lambda x: x['funding_apr'])
+        if not hip3_by_funding:
+            print(f"{Colors.DIM}  No active HIP-3 assets found{Colors.END}")
+        for a in hip3_by_funding:
+            funding_color = Colors.GREEN if a['funding_apr'] < -10 else Colors.RED if a['funding_apr'] > 10 else Colors.YELLOW
+            chg_color = Colors.GREEN if a['price_chg'] >= 0 else Colors.RED
+            print(f"{a['name']:<14} ${a['price']:>10,.2f} {chg_color}{a['price_chg']:>+7.1f}%{Colors.END} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
 
         print(f"\n{Colors.BOLD}Summary:{Colors.END}")
         negative_funding = [a for a in assets if a['funding_apr'] < -20]
@@ -1943,8 +1918,8 @@ def cmd_scan(args):
             best = min(negative_funding, key=lambda x: x['funding_apr'])
             print(f"  Best native opportunity: {best['name']} at {best['funding_apr']:.1f}% APR (${best['volume']:,.0f} vol)")
 
-        if hip3_data:
-            best_hip3 = min(hip3_data, key=lambda x: x['funding_apr'])
+        if hip3_active:
+            best_hip3 = min(hip3_active, key=lambda x: x['funding_apr'])
             print(f"  Best HIP-3 opportunity: {best_hip3['name']} at {best_hip3['funding_apr']:.1f}% APR")
 
     except Exception as e:
