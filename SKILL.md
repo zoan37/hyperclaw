@@ -43,11 +43,11 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 | `status` | Account balance, positions, PnL | `hl.py status` |
 | `positions` | Detailed position info (leverage, liquidation) | `hl.py positions` |
 | `orders` | Open orders with TP/SL trigger details | `hl.py orders` |
-| `user-funding` | Funding payments received/paid (USD) | `hl.py user-funding --days 7` |
-| `history` | Trade history from API | `hl.py history --limit 50` |
+| `funding-payments` | Funding payments received/paid (USD) | `hl.py funding-payments --days 7` |
+| `fills` | Trade fills from API | `hl.py fills --limit 50` |
 | `portfolio` | Account value and PnL over time | `hl.py portfolio` |
-| `user-fees` | Fee schedule, volume tier, maker/taker rates | `hl.py user-fees` |
-| `historical-orders` | Full order history with statuses (filled/canceled/rejected) | `hl.py historical-orders --limit 50` |
+| `fees` | Fee schedule, volume tier, maker/taker rates | `hl.py fees` |
+| `order-history` | Full order history with statuses (filled/canceled/rejected) | `hl.py order-history --limit 50` |
 
 ### Market Data
 

@@ -1382,7 +1382,7 @@ def cmd_max_trade_size(args):
         print(f"{Colors.RED}Error fetching max trade size: {e}{Colors.END}")
 
 
-def cmd_user_funding(args):
+def cmd_funding_payments(args):
     """Show funding payments received/paid."""
     info, config = setup_info(require_credentials=True)
     days = args.days
@@ -1593,7 +1593,7 @@ def cmd_inspect(args):
         print(f"{Colors.RED}Error inspecting address: {e}{Colors.END}")
 
 
-def cmd_user_fees(args):
+def cmd_fees(args):
     """Show fee schedule and volume info."""
     info, config = setup_info(require_credentials=True)
 
@@ -1613,7 +1613,7 @@ def cmd_user_fees(args):
         print(f"{Colors.RED}Error fetching fees: {e}{Colors.END}")
 
 
-def cmd_historical_orders(args):
+def cmd_order_history(args):
     """Show full order history with final statuses."""
     info, config = setup_info(require_credentials=True)
 
@@ -2135,7 +2135,7 @@ def cmd_dexes(args):
     print()
 
 
-def cmd_history(args):
+def cmd_fills(args):
     """Show trade history from Hyperliquid API."""
     info, config = setup_info(require_credentials=True)
 
@@ -2277,7 +2277,7 @@ def main():
     mts_parser = subparsers.add_parser('max-trade-size', help='Max tradeable size for an asset')
     mts_parser.add_argument('coin', help='Asset (e.g., SOL, xyz:TSLA)')
 
-    uf_parser = subparsers.add_parser('user-funding', help='Funding payments received/paid')
+    uf_parser = subparsers.add_parser('funding-payments', help='Funding payments received/paid')
     uf_parser.add_argument('--days', type=int, default=7, help='Number of days (default: 7)')
 
     inspect_parser = subparsers.add_parser('inspect', help='View any address positions')
@@ -2289,9 +2289,9 @@ def main():
     spot_meta_parser.add_argument('--top', type=int, default=30, help='Top pairs to show (default: 30)')
     spot_meta_parser.add_argument('--min-volume', type=float, default=0, help='Min 24h volume filter')
 
-    subparsers.add_parser('user-fees', help='Fee schedule and volume info')
+    subparsers.add_parser('fees', help='Fee schedule and volume info')
 
-    ho_parser = subparsers.add_parser('historical-orders', help='Full order history with statuses')
+    ho_parser = subparsers.add_parser('order-history', help='Full order history with statuses')
     ho_parser.add_argument('--limit', type=int, default=50, help='Number of orders (default: 50)')
 
     # Analysis commands
@@ -2310,7 +2310,7 @@ def main():
 
     subparsers.add_parser('dexes', help='List all HIP-3 dexes and assets')
 
-    history_parser = subparsers.add_parser('history', help='Trade history')
+    history_parser = subparsers.add_parser('fills', help='Trade fills')
     history_parser.add_argument('--limit', type=int, default=20, help='Number of trades (default: 20)')
 
     args = parser.parse_args()
@@ -2345,18 +2345,18 @@ def main():
         'predicted-fundings': cmd_predicted_fundings,
         'trades': cmd_trades,
         'max-trade-size': cmd_max_trade_size,
-        'user-funding': cmd_user_funding,
+        'funding-payments': cmd_funding_payments,
         'inspect': cmd_inspect,
         'spot-balances': cmd_spot_balances,
         'spot-meta': cmd_spot_meta,
-        'user-fees': cmd_user_fees,
-        'historical-orders': cmd_historical_orders,
+        'fees': cmd_fees,
+        'order-history': cmd_order_history,
         'analyze': cmd_analyze,
         'raw': cmd_raw,
         'scan': cmd_scan,
         'hip3': cmd_hip3,
         'dexes': cmd_dexes,
-        'history': cmd_history,
+        'fills': cmd_fills,
     }
 
     if args.command in commands:
