@@ -315,40 +315,41 @@ def cmd_funding(args):
 
                 print(f"  {coin:<12} {funding_pct:>11.4f}% {apr:>11.1f}% {signal}")
             else:
-                # Try HIP-3 perps
-                try:
-                    all_dexes = info.perp_dexs()
-                    hip3_dexes = [d.get('name') for d in all_dexes if d is not None and d.get('name')]
-                except Exception:
-                    hip3_dexes = ['xyz', 'vntl', 'flx', 'hyna', 'km', 'abcd', 'cash']
+                # Try HIP-3 perps via bulk endpoint
                 found = False
-
                 if ':' in coin:
-                    coins_to_try = [coin]
+                    dex_prefix = coin.split(':')[0]
+                    dexes_to_try = [dex_prefix]
                 else:
-                    coins_to_try = [f"{dex}:{coin}" for dex in hip3_dexes]
-
-                import requests
-                for try_coin in coins_to_try:
                     try:
-                        resp = requests.post(
-                            config['api_url'] + "/info",
-                            json={"type": "fundingHistory", "coin": try_coin, "startTime": 0},
-                            timeout=10
-                        )
-                        if resp.status_code == 200:
-                            data = resp.json()
-                            if data:
-                                latest = data[-1]
-                                funding = float(latest.get('fundingRate', 0))
+                        all_dexes = info.perp_dexs()
+                        dexes_to_try = [d.get('name') for d in all_dexes if d is not None and d.get('name')]
+                    except Exception:
+                        dexes_to_try = ['xyz', 'vntl', 'flx', 'hyna', 'km', 'abcd', 'cash']
+
+                for dex_name in dexes_to_try:
+                    try:
+                        dex_meta = info.post("/info", {"type": "metaAndAssetCtxs", "dex": dex_name})
+                        if not dex_meta or len(dex_meta) < 2:
+                            continue
+                        dex_universe = dex_meta[0].get('universe', [])
+                        dex_ctxs = dex_meta[1]
+                        for j, asset in enumerate(dex_universe):
+                            asset_name = asset.get('name', '')
+                            # Match full name (xyz:TSLA) or short name (TSLA)
+                            if asset_name == coin or asset_name == f"{dex_name}:{coin}":
+                                ctx = dex_ctxs[j]
+                                funding = float(ctx.get('funding', 0))
                                 funding_pct = funding * 100
                                 apr = funding * 24 * 365 * 100
                                 signal = f"{Colors.GREEN}Shorts paying{Colors.END}" if funding < 0 else f"{Colors.YELLOW}Longs paying{Colors.END}"
-                                print(f"  {try_coin:<16} {funding_pct:>11.4f}% {apr:>11.1f}% {signal}")
+                                print(f"  {asset_name:<16} {funding_pct:>11.4f}% {apr:>11.1f}% {signal}")
                                 found = True
                                 break
                     except Exception:
                         pass
+                    if found:
+                        break
 
                 if not found:
                     print(f"  {coin:<12} {Colors.DIM}Not found{Colors.END}")
@@ -1930,32 +1931,18 @@ def cmd_scan(args):
 
 def cmd_hip3(args):
     """Get detailed data for HIP-3 perps."""
-    info, config = setup_info()
     import requests as req
 
-    if not args.coin:
+    if args.coin:
+        # Single asset: detailed view with order book (2 API calls)
+        info, config = setup_info()
+        coin = args.coin if ':' in args.coin else f'xyz:{args.coin}'
+
+        print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 EQUITY PERPS DATA{Colors.END}")
+        print("=" * 80)
+        print(f"\n{Colors.BOLD}{coin}{Colors.END}")
+
         try:
-            meta = info.meta(dex='xyz')
-            universe = meta.get('universe', [])
-            assets = sorted([a.get('name', '') for a in universe if a.get('name')])
-        except Exception:
-            assets = [
-                'xyz:TSLA', 'xyz:NVDA', 'xyz:AAPL', 'xyz:GOOGL', 'xyz:AMZN',
-                'xyz:META', 'xyz:MSFT', 'xyz:HOOD', 'xyz:PLTR', 'xyz:MSTR',
-                'xyz:AMD', 'xyz:NFLX', 'xyz:COIN', 'xyz:XYZ100',
-                'xyz:GOLD', 'xyz:SILVER', 'xyz:COPPER', 'xyz:NATGAS',
-            ]
-    else:
-        coin = args.coin if args.coin.startswith('xyz:') else f'xyz:{args.coin}'
-        assets = [coin]
-
-    print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 EQUITY PERPS DATA{Colors.END}")
-    print("=" * 80)
-
-    for coin in assets:
-        try:
-            print(f"\n{Colors.BOLD}{coin}{Colors.END}")
-
             book_resp = req.post(
                 config['api_url'] + "/info",
                 json={"type": "l2Book", "coin": coin},
@@ -2005,6 +1992,44 @@ def cmd_hip3(args):
 
         except Exception as e:
             print(f"  {Colors.RED}Error: {e}{Colors.END}")
+    else:
+        # List all: bulk fetch (1 API call per dex instead of 2×N)
+        info, config = setup_info(include_hip3=False)
+
+        print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 EQUITY PERPS DATA{Colors.END}")
+        print("=" * 80)
+        print(f"\n{'Asset':<16} {'Price':>12} {'24h Chg':>8} {'Funding/hr':>12} {'APR':>10} {'OI':>15} {'Volume':>15}")
+        print("-" * 92)
+
+        for dex_name in [d for d in get_all_dex_names(config['api_url']) if d]:
+            try:
+                dex_meta = info.post("/info", {"type": "metaAndAssetCtxs", "dex": dex_name})
+                if not dex_meta or len(dex_meta) < 2:
+                    continue
+                dex_universe = dex_meta[0].get('universe', [])
+                dex_ctxs = dex_meta[1]
+                for i, asset in enumerate(dex_universe):
+                    ctx = dex_ctxs[i]
+                    name = asset.get('name', '')
+                    if not name:
+                        continue
+                    price = float(ctx.get('markPx', 0))
+                    funding = float(ctx.get('funding', 0))
+                    oi = float(ctx.get('openInterest', 0))
+                    volume = float(ctx.get('dayNtlVlm', 0))
+                    prev_day_px = float(ctx.get('prevDayPx', 0))
+                    price_chg = ((price - prev_day_px) / prev_day_px * 100) if prev_day_px > 0 else 0
+
+                    if volume < 100 and oi < 100:
+                        continue
+
+                    funding_hr = funding * 100
+                    funding_apr = funding * 24 * 365 * 100
+                    funding_color = Colors.GREEN if funding_apr < -10 else Colors.RED if funding_apr > 10 else Colors.YELLOW
+                    chg_color = Colors.GREEN if price_chg >= 0 else Colors.RED
+                    print(f"{name:<16} ${price:>10,.2f} {chg_color}{price_chg:>+7.1f}%{Colors.END} {funding_color}{funding_hr:>11.4f}%{Colors.END} {funding_apr:>9.1f}% ${oi:>13,.0f} ${volume:>13,.0f}")
+            except Exception:
+                pass
 
 
 def cmd_dexes(args):
