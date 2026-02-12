@@ -85,7 +85,7 @@ Spot uses the same `buy`/`sell`/`limit-buy`/`limit-sell`/`close`/`cancel` comman
 | Command | Description | Example |
 |---------|-------------|---------|
 | `hip3 [COIN]` | HIP-3 perp data (price, spread, funding) | `hl.py hip3 TSLA` |
-| `hip3` | All xyz dex assets | `hl.py hip3` |
+| `hip3` | All HIP-3 dex assets (all dexes) | `hl.py hip3` |
 | `dexes` | List all HIP-3 dexes and their assets | `hl.py dexes` |
 
 ### Trading

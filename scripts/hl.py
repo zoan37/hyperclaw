@@ -4,24 +4,39 @@ HyperClaw - Hyperliquid Trading CLI for AI Agents
 
 Usage:
     python hl.py status              # Account balance, positions, PnL
-    python hl.py positions           # Detailed position info
+    python hl.py positions           # Detailed position info (leverage, liquidation)
+    python hl.py orders              # Open orders with TP/SL triggers
+    python hl.py fills               # Trade fills
+    python hl.py order-history       # Full order history (filled/canceled/rejected)
+    python hl.py funding-payments    # Funding payments received/paid (USD)
+    python hl.py fees                # Fee schedule and volume tier
+    python hl.py portfolio           # Account value and PnL over time
     python hl.py price BTC           # Current price
     python hl.py funding BTC         # Funding rate
     python hl.py book BTC            # Order book
+    python hl.py candles BTC         # Historical OHLCV candles
+    python hl.py funding-history SOL # Funding rate history
+    python hl.py predicted-fundings  # Predicted next funding (HL, Binance, Bybit)
+    python hl.py trades BTC          # Recent trades with buy/sell flow
+    python hl.py max-trade-size SOL  # Available margin per direction
+    python hl.py inspect 0x1234...   # View any wallet's positions
+    python hl.py scan                # Scan all perps for opportunities
+    python hl.py analyze BTC ETH     # Comprehensive market data dump
+    python hl.py raw BTC             # Raw JSON data
+    python hl.py hip3                # HIP-3 perp data (all dexes)
+    python hl.py dexes               # List all HIP-3 dexes
+    python hl.py spot-balances       # Spot token balances
+    python hl.py spot-meta           # List spot pairs by volume
     python hl.py buy BTC 0.01        # Market buy
     python hl.py sell BTC 0.01       # Market sell
     python hl.py limit-buy BTC 0.01 85000   # Limit buy
     python hl.py limit-sell BTC 0.01 95000  # Limit sell
+    python hl.py stop-loss SOL 0.5 115      # Stop-loss trigger
+    python hl.py take-profit SOL 0.5 150    # Take-profit trigger
     python hl.py close BTC           # Close position
-    python hl.py orders              # List open orders
     python hl.py cancel ORDER_ID     # Cancel order
     python hl.py cancel-all          # Cancel all orders
-    python hl.py candles BTC          # Historical OHLCV candles
-    python hl.py scan                # Scan all perps for opportunities
-    python hl.py hip3                # HIP-3 equity perp data
-    python hl.py dexes               # List all HIP-3 dexes
-    python hl.py history             # Trade history
-    python hl.py leverage SOL 5      # Set leverage
+    python hl.py leverage xyz:TSLA 3 # Set leverage
     python hl.py margin xyz:TSLA 10  # Add margin to isolated position
     python hl.py modify-order 123 --price 130  # Modify order
     python hl.py schedule-cancel 60  # Auto-cancel orders in 60min

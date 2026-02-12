@@ -27,10 +27,11 @@ See [SKILL.md](SKILL.md) for the full command reference and usage instructions t
 
 ## Commands
 
-- **Account:** `status`, `positions`, `orders`, `history`
-- **Market Data:** `price`, `funding`, `book`, `scan`, `analyze`, `raw`
+- **Account:** `status`, `positions`, `orders`, `fills`, `order-history`, `funding-payments`, `fees`, `portfolio`
+- **Market Data:** `price`, `funding`, `book`, `candles`, `funding-history`, `predicted-fundings`, `trades`, `max-trade-size`, `inspect`, `scan`, `analyze`, `raw`
+- **Spot:** `spot-balances`, `spot-meta`
 - **HIP-3:** `hip3`, `dexes`
-- **Trading:** `buy`, `sell`, `limit-buy`, `limit-sell`, `stop-loss`, `take-profit`, `close`, `cancel`, `cancel-all`
+- **Trading:** `buy`, `sell`, `limit-buy`, `limit-sell`, `stop-loss`, `take-profit`, `close`, `cancel`, `cancel-all`, `leverage`, `margin`, `modify-order`, `schedule-cancel`
 
 ## License
 
