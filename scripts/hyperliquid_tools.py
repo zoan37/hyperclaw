@@ -246,7 +246,9 @@ def cmd_positions(args):
             if leverage:
                 lev_type = leverage.get('type', 'unknown')
                 lev_val = leverage.get('value', 0)
-                print(f"  Leverage:       {lev_val}x ({lev_type})")
+                max_lev = _get_max_leverage(info, coin)
+                max_str = f" / max {max_lev}x" if max_lev else ""
+                print(f"  Leverage:       {lev_val}x ({lev_type}{max_str})")
             if liq_px:
                 print(f"  Liquidation:    {format_price(liq_px)}")
 
@@ -405,11 +407,11 @@ def cmd_book(args):
 
 
 def cmd_orders(args):
-    """List open orders."""
+    """List open orders with trigger/TP/SL details."""
     info, config = setup_info(require_credentials=True)
 
     try:
-        open_orders = info.open_orders(config['account_address'])
+        open_orders = info.frontend_open_orders(config['account_address'])
 
         print(f"\n{Colors.BOLD}Open Orders:{Colors.END}")
 
@@ -417,8 +419,8 @@ def cmd_orders(args):
             print(f"  {Colors.DIM}No open orders{Colors.END}")
             return
 
-        print(f"  {'OID':<12} {'Asset':<12} {'Side':<6} {'Size':>12} {'Price':>12} {'Type':<10}")
-        print("  " + "-" * 70)
+        print(f"  {'OID':<12} {'Asset':<12} {'Side':<6} {'Size':>12} {'Price':>12} {'Type':<12} {'Details'}")
+        print("  " + "-" * 85)
 
         for order in open_orders:
             oid = order.get('oid', 'N/A')
@@ -429,7 +431,22 @@ def cmd_orders(args):
             px = float(order.get('limitPx', 0))
             order_type = order.get('orderType', 'limit')
 
-            print(f"  {oid:<12} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>12} {format_price(px):>12} {order_type:<10}")
+            # Build details string from extra fields
+            details = []
+            if order.get('isTrigger'):
+                trigger_px = order.get('triggerPx', '')
+                trigger_cond = order.get('triggerCondition', '')
+                details.append(f"trigger@{trigger_px} {trigger_cond}")
+            if order.get('isPositionTpsl'):
+                details.append("TP/SL")
+            if order.get('reduceOnly'):
+                details.append("reduce-only")
+            tif = order.get('tif', '')
+            if tif and tif != 'Gtc':
+                details.append(tif)
+            detail_str = ", ".join(details) if details else ""
+
+            print(f"  {oid:<12} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>12} {format_price(px):>12} {order_type:<12} {detail_str}")
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching orders: {e}{Colors.END}")
@@ -438,6 +455,70 @@ def cmd_orders(args):
 # ============================================================================
 # TRADING COMMANDS
 # ============================================================================
+
+def _set_leverage(exchange, coin, leverage, is_cross=True):
+    """Set leverage for an asset before trading."""
+    margin_type = "cross" if is_cross else "isolated"
+    try:
+        result = exchange.update_leverage(leverage, coin, is_cross)
+        if result.get('status') == 'ok':
+            print(f"  Leverage set: {leverage}x ({margin_type})")
+        else:
+            print(f"{Colors.RED}Failed to set leverage: {result}{Colors.END}")
+            return False
+    except Exception as e:
+        print(f"{Colors.RED}Error setting leverage: {e}{Colors.END}")
+        return False
+    return True
+
+
+def _get_max_leverage(info, coin):
+    """Get max leverage for an asset from metadata."""
+    try:
+        # Check native perps
+        meta = info.meta()
+        for asset in meta.get('universe', []):
+            if asset['name'] == coin:
+                return asset.get('maxLeverage')
+        # Check HIP-3 dexes
+        if ':' in coin:
+            dex = coin.split(':')[0]
+            meta = info.meta(dex=dex)
+            for asset in meta.get('universe', []):
+                if asset['name'] == coin:
+                    return asset.get('maxLeverage')
+    except Exception:
+        pass
+    return None
+
+
+def cmd_leverage(args):
+    """Set leverage for an asset."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    leverage = args.leverage
+    is_cross = not args.isolated
+
+    max_lev = _get_max_leverage(info, coin)
+    margin_type = "cross" if is_cross else "isolated"
+    max_str = f" (max: {max_lev}x)" if max_lev else ""
+
+    print(f"\n{Colors.BOLD}Setting {coin} leverage: {leverage}x ({margin_type}){max_str}{Colors.END}")
+
+    if max_lev and leverage > max_lev:
+        print(f"{Colors.RED}Error: {leverage}x exceeds max leverage of {max_lev}x for {coin}{Colors.END}")
+        return
+
+    try:
+        result = exchange.update_leverage(leverage, coin, is_cross)
+        if result.get('status') == 'ok':
+            print(f"{Colors.GREEN}Leverage updated!{Colors.END}")
+            print(f"  {coin}: {leverage}x {margin_type}")
+        else:
+            print(f"{Colors.RED}Failed: {result}{Colors.END}")
+    except Exception as e:
+        print(f"{Colors.RED}Error: {e}{Colors.END}")
+
 
 def cmd_buy(args):
     """Market buy."""
@@ -450,6 +531,11 @@ def cmd_buy(args):
         print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
 
     try:
+        # Set leverage if specified
+        if args.leverage:
+            if not _set_leverage(exchange, coin, args.leverage, not getattr(args, 'isolated', False)):
+                return
+
         # Get current price for reference
         all_mids = info.all_mids()
         if coin in all_mids:
@@ -489,6 +575,11 @@ def cmd_sell(args):
         print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
 
     try:
+        # Set leverage if specified
+        if args.leverage:
+            if not _set_leverage(exchange, coin, args.leverage, not getattr(args, 'isolated', False)):
+                return
+
         # Get current price for reference
         all_mids = info.all_mids()
         if coin in all_mids:
@@ -799,7 +890,7 @@ def cmd_cancel(args):
 
 
 def cmd_cancel_all(args):
-    """Cancel all open orders."""
+    """Cancel all open orders in a single bulk request."""
     exchange, info, config = setup_exchange()
 
     print(f"\n{Colors.BOLD}Canceling all open orders{Colors.END}")
@@ -813,22 +904,90 @@ def cmd_cancel_all(args):
 
         print(f"Found {len(open_orders)} open orders")
 
-        for order in open_orders:
-            coin = order.get('coin')
-            oid = order.get('oid')
-            try:
-                result = exchange.cancel(coin, int(oid))
-                if result.get('status') == 'ok':
-                    print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
-                else:
-                    print(f"  {Colors.RED}Failed to cancel {coin} order {oid}{Colors.END}")
-            except Exception as e:
-                print(f"  {Colors.RED}Error canceling {coin} order {oid}: {e}{Colors.END}")
+        cancel_requests = [
+            {"coin": order.get('coin'), "oid": int(order.get('oid'))}
+            for order in open_orders
+        ]
 
-        print(f"\n{Colors.GREEN}Done!{Colors.END}")
+        result = exchange.bulk_cancel(cancel_requests)
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for i, status in enumerate(statuses):
+                coin = cancel_requests[i]['coin'] if i < len(cancel_requests) else '?'
+                oid = cancel_requests[i]['oid'] if i < len(cancel_requests) else '?'
+                if status == 'success':
+                    print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
+                elif isinstance(status, dict) and 'error' in status:
+                    print(f"  {Colors.RED}Failed {coin} order {oid}: {status['error']}{Colors.END}")
+                else:
+                    print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
+            print(f"\n{Colors.GREEN}Done!{Colors.END}")
+        else:
+            print(f"{Colors.RED}Bulk cancel failed: {result}{Colors.END}")
 
     except Exception as e:
         print(f"{Colors.RED}Error canceling orders: {e}{Colors.END}")
+
+
+def cmd_modify_order(args):
+    """Modify an existing order's price and/or size."""
+    exchange, info, config = setup_exchange()
+    oid = int(args.oid)
+    new_price = args.price
+    new_size = getattr(args, 'size', None)
+
+    try:
+        # Find the existing order to get coin and side
+        open_orders = info.frontend_open_orders(config['account_address'])
+
+        order = None
+        for o in open_orders:
+            if o.get('oid') == oid:
+                order = o
+                break
+
+        if not order:
+            print(f"{Colors.YELLOW}Order {oid} not found in open orders{Colors.END}")
+            return
+
+        coin = order['coin']
+        is_buy = order['side'] == 'B'
+        side_label = "Buy" if is_buy else "Sell"
+        current_sz = float(order['sz'])
+        current_px = float(order['limitPx'])
+        sz = new_size if new_size else current_sz
+
+        print(f"\n{Colors.BOLD}Modifying order {oid} ({coin}){Colors.END}")
+        print(f"  {side_label}: {current_sz} @ {format_price(current_px)} -> {sz} @ {format_price(new_price)}")
+
+        result = exchange.modify_order(
+            oid,
+            coin,
+            is_buy,
+            sz,
+            new_price,
+            {"limit": {"tif": "Gtc"}},
+        )
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'resting' in status:
+                    print(f"\n{Colors.GREEN}Order modified!{Colors.END}")
+                    print(f"  OID: {status['resting'].get('oid')}")
+                elif 'filled' in status:
+                    filled = status['filled']
+                    print(f"\n{Colors.GREEN}Modified order filled immediately!{Colors.END}")
+                    print(f"  Size: {filled.get('totalSz')}")
+                    print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Modify failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error modifying order: {e}{Colors.END}")
 
 
 def cmd_analyze(args):
@@ -1041,6 +1200,316 @@ def cmd_raw(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+
+
+def cmd_candles(args):
+    """Get OHLCV candlestick data for technical analysis."""
+    info, config = setup_info()
+    coin = args.coin
+    interval = args.interval
+    lookback = args.lookback
+
+    # Parse lookback to milliseconds
+    now_ms = int(datetime.now().timestamp() * 1000)
+    unit = lookback[-1].lower()
+    amount = int(lookback[:-1])
+    if unit == 'h':
+        start_ms = now_ms - (amount * 3600 * 1000)
+    elif unit == 'd':
+        start_ms = now_ms - (amount * 86400 * 1000)
+    elif unit == 'w':
+        start_ms = now_ms - (amount * 7 * 86400 * 1000)
+    else:
+        print(f"{Colors.RED}Invalid lookback format. Use e.g., 24h, 7d, 2w{Colors.END}")
+        return
+
+    print(f"\n{Colors.BOLD}{coin} Candles ({interval}, last {lookback}){Colors.END}")
+    print("=" * 80)
+
+    try:
+        candles = info.candles_snapshot(coin, interval, start_ms, now_ms)
+
+        if not candles:
+            print(f"{Colors.DIM}No candle data{Colors.END}")
+            return
+
+        # Print table
+        print(f"  {'Time':<18} {'Open':>12} {'High':>12} {'Low':>12} {'Close':>12} {'Volume':>14}")
+        print("  " + "-" * 82)
+
+        closes = []
+        for c in candles:
+            t = datetime.fromtimestamp(c['t'] / 1000).strftime('%Y-%m-%d %H:%M')
+            o = float(c['o'])
+            h = float(c['h'])
+            l = float(c['l'])
+            cl = float(c['c'])
+            v = float(c['v'])
+            closes.append(cl)
+
+            # Color: green if close > open, red if close < open
+            color = Colors.GREEN if cl >= o else Colors.RED
+            print(f"  {t:<18} {color}{format_price(o):>12} {format_price(h):>12} {format_price(l):>12} {format_price(cl):>12}{Colors.END} {v:>14.2f}")
+
+        # Summary stats
+        if len(closes) >= 2:
+            print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+            first = closes[0]
+            last = closes[-1]
+            high = max(float(c['h']) for c in candles)
+            low = min(float(c['l']) for c in candles)
+            change = ((last - first) / first) * 100
+            change_color = Colors.GREEN if change >= 0 else Colors.RED
+
+            print(f"  Period change: {change_color}{change:+.2f}%{Colors.END} ({format_price(first)} -> {format_price(last)})")
+            print(f"  Period high:   {format_price(high)}")
+            print(f"  Period low:    {format_price(low)}")
+            print(f"  Candles:       {len(candles)}")
+
+            # Simple moving averages if enough data
+            if len(closes) >= 20:
+                sma20 = sum(closes[-20:]) / 20
+                print(f"  SMA(20):       {format_price(sma20)}")
+                pos = "above" if last > sma20 else "below"
+                print(f"  Price vs SMA:  {pos} ({((last - sma20) / sma20 * 100):+.2f}%)")
+
+            if len(closes) >= 50:
+                sma50 = sum(closes[-50:]) / 50
+                print(f"  SMA(50):       {format_price(sma50)}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching candles: {e}{Colors.END}")
+
+
+def cmd_funding_history(args):
+    """Show historical funding rates for a coin."""
+    info, config = setup_info()
+    coin = args.coin
+    lookback = getattr(args, 'lookback', '7d')
+
+    # Parse lookback to ms
+    now_ms = int(datetime.now().timestamp() * 1000)
+    unit = lookback[-1].lower()
+    amount = int(lookback[:-1])
+    if unit == 'h':
+        start_ms = now_ms - (amount * 3600 * 1000)
+    elif unit == 'd':
+        start_ms = now_ms - (amount * 86400 * 1000)
+    elif unit == 'w':
+        start_ms = now_ms - (amount * 7 * 86400 * 1000)
+    else:
+        start_ms = now_ms - (7 * 86400 * 1000)
+
+    try:
+        data = info.funding_history(coin, start_ms, now_ms)
+        if not data:
+            print(f"No funding history for {coin}")
+            return
+
+        print(f"\n{Colors.BOLD}{coin} Funding History (last {lookback}){Colors.END}")
+        print("=" * 70)
+        print(f"  {'Time':<22} {'Rate':>12} {'Annualized':>14} {'Premium':>12}")
+        print(f"  {'-'*22} {'-'*12} {'-'*14} {'-'*12}")
+
+        rates = []
+        for entry in data:
+            ts = datetime.fromtimestamp(entry['time'] / 1000).strftime('%Y-%m-%d %H:%M')
+            rate = float(entry['fundingRate'])
+            premium = float(entry['premium'])
+            annual = rate * 8760 * 100  # hourly rate * hours/year * 100 for %
+            rates.append(rate)
+
+            color = Colors.GREEN if rate >= 0 else Colors.RED
+            print(f"  {ts:<22} {color}{rate*100:>+11.6f}%{Colors.END} {color}{annual:>+13.2f}%{Colors.END} {premium*100:>+11.6f}%")
+
+        # Summary
+        avg_rate = sum(rates) / len(rates) if rates else 0
+        avg_annual = avg_rate * 8760 * 100
+        max_rate = max(rates) if rates else 0
+        min_rate = min(rates) if rates else 0
+        color = Colors.GREEN if avg_rate >= 0 else Colors.RED
+        print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+        print(f"  Samples:        {len(rates)}")
+        print(f"  Avg rate:       {color}{avg_rate*100:+.6f}% ({avg_annual:+.2f}% annualized){Colors.END}")
+        print(f"  Max rate:       {max_rate*100:+.6f}%")
+        print(f"  Min rate:       {min_rate*100:+.6f}%")
+        print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching funding history: {e}{Colors.END}")
+
+
+def cmd_trades(args):
+    """Show recent trades for a coin."""
+    info, config = setup_info()
+    coin = args.coin
+    limit = getattr(args, 'limit', 20)
+
+    try:
+        # SDK doesn't wrap recentTrades, use raw post
+        data = info.post("/info", {"type": "recentTrades", "coin": coin})
+        if not data:
+            print(f"No recent trades for {coin}")
+            return
+
+        # Take last N trades
+        trades = data[-limit:] if len(data) > limit else data
+
+        print(f"\n{Colors.BOLD}{coin} Recent Trades (last {len(trades)}){Colors.END}")
+        print("=" * 75)
+        print(f"  {'Time':<22} {'Side':<6} {'Price':>14} {'Size':>12} {'Value':>14}")
+        print(f"  {'-'*22} {'-'*6} {'-'*14} {'-'*12} {'-'*14}")
+
+        total_buy_vol = 0
+        total_sell_vol = 0
+        for t in trades:
+            ts = datetime.fromtimestamp(t['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            side = t['side']
+            px = float(t['px'])
+            sz = float(t['sz'])
+            value = px * sz
+
+            if side == 'B':
+                color = Colors.GREEN
+                side_label = "BUY"
+                total_buy_vol += value
+            else:
+                color = Colors.RED
+                side_label = "SELL"
+                total_sell_vol += value
+
+            print(f"  {ts:<22} {color}{side_label:<6}{Colors.END} ${px:>13,.2f} {sz:>12} ${value:>13,.2f}")
+
+        # Summary
+        total_vol = total_buy_vol + total_sell_vol
+        buy_pct = (total_buy_vol / total_vol * 100) if total_vol > 0 else 50
+        print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+        print(f"  Buy volume:     ${total_buy_vol:>14,.2f} ({buy_pct:.1f}%)")
+        print(f"  Sell volume:    ${total_sell_vol:>14,.2f} ({100-buy_pct:.1f}%)")
+        print(f"  Total volume:   ${total_vol:>14,.2f}")
+        bias_color = Colors.GREEN if buy_pct > 50 else Colors.RED if buy_pct < 50 else Colors.END
+        bias = "BUY BIAS" if buy_pct > 55 else "SELL BIAS" if buy_pct < 45 else "NEUTRAL"
+        print(f"  Bias:           {bias_color}{bias}{Colors.END}")
+        print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching recent trades: {e}{Colors.END}")
+
+
+def cmd_user_funding(args):
+    """Show personal funding payments received/paid on positions."""
+    info, config = setup_info(require_credentials=True)
+    lookback = getattr(args, 'lookback', '7d')
+
+    # Parse lookback to ms
+    now_ms = int(datetime.now().timestamp() * 1000)
+    unit = lookback[-1].lower()
+    amount = int(lookback[:-1])
+    if unit == 'h':
+        start_ms = now_ms - (amount * 3600 * 1000)
+    elif unit == 'd':
+        start_ms = now_ms - (amount * 86400 * 1000)
+    elif unit == 'w':
+        start_ms = now_ms - (amount * 7 * 86400 * 1000)
+    else:
+        start_ms = now_ms - (7 * 86400 * 1000)
+
+    try:
+        data = info.user_funding_history(config['account_address'], start_ms, now_ms)
+        if not data:
+            print(f"No funding payments in the last {lookback}")
+            return
+
+        print(f"\n{Colors.BOLD}Your Funding Payments (last {lookback}){Colors.END}")
+        print("=" * 80)
+        print(f"  {'Time':<22} {'Coin':<12} {'Payment':>14} {'Position Size':>14}")
+        print(f"  {'-'*22} {'-'*12} {'-'*14} {'-'*14}")
+
+        total_funding = 0
+        by_coin = {}
+        for entry in data:
+            ts = datetime.fromtimestamp(entry['time'] / 1000).strftime('%Y-%m-%d %H:%M')
+            coin = entry.get('coin', entry.get('delta', {}).get('coin', '?'))
+            delta = entry.get('delta', {})
+            funding_delta = float(delta.get('usdc', 0))
+            szi = delta.get('szi', '?')
+            total_funding += funding_delta
+
+            if coin not in by_coin:
+                by_coin[coin] = 0
+            by_coin[coin] += funding_delta
+
+            color = Colors.GREEN if funding_delta >= 0 else Colors.RED
+            print(f"  {ts:<22} {coin:<12} {color}${funding_delta:>+13,.4f}{Colors.END} {szi:>14}")
+
+        # Summary
+        color = Colors.GREEN if total_funding >= 0 else Colors.RED
+        print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+        print(f"  Total funding:  {color}${total_funding:>+,.4f}{Colors.END}")
+        print(f"  Payments:       {len(data)}")
+        if by_coin:
+            print(f"\n  {Colors.BOLD}By coin:{Colors.END}")
+            for coin, amt in sorted(by_coin.items(), key=lambda x: abs(x[1]), reverse=True):
+                c = Colors.GREEN if amt >= 0 else Colors.RED
+                print(f"    {coin:<12} {c}${amt:>+,.4f}{Colors.END}")
+        print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching funding payments: {e}{Colors.END}")
+
+
+def cmd_portfolio(args):
+    """Show portfolio performance overview."""
+    info, config = setup_info(require_credentials=True)
+
+    try:
+        data = info.portfolio(config['account_address'])
+        if not data:
+            print("No portfolio data available")
+            return
+
+        print(f"\n{Colors.BOLD}Portfolio Performance{Colors.END}")
+        print("=" * 60)
+
+        # API returns [["day", {data}], ["week", {data}], ...] or dict
+        periods = {}
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, list) and len(item) == 2:
+                    periods[item[0]] = item[1]
+        elif isinstance(data, dict):
+            periods = data
+
+        labels = {'day': '24h', 'week': '7d', 'month': '30d', 'allTime': 'All Time'}
+        for period_key in ['day', 'week', 'month', 'allTime']:
+            period_data = periods.get(period_key)
+            if not period_data:
+                continue
+            label = labels.get(period_key, period_key)
+            vlm = float(period_data.get('vlm', 0))
+
+            # Extract PnL from pnlHistory
+            pnl_history = period_data.get('pnlHistory', [])
+            pnl = float(pnl_history[-1][1]) if pnl_history else 0
+
+            # Extract account value from history
+            acct_history = period_data.get('accountValueHistory', [])
+            acct_val = float(acct_history[-1][1]) if acct_history else 0
+            start_val = float(acct_history[0][1]) if acct_history else 0
+
+            pnl_color = Colors.GREEN if pnl >= 0 else Colors.RED
+            print(f"\n  {Colors.BOLD}{label}:{Colors.END}")
+            print(f"    Account:  ${acct_val:>,.2f}")
+            print(f"    PnL:      {pnl_color}${pnl:>+,.4f}{Colors.END}")
+            if start_val > 0:
+                pct = (pnl / start_val) * 100
+                print(f"    Return:   {pnl_color}{pct:>+.4f}%{Colors.END}")
+            print(f"    Volume:   ${vlm:>,.2f}")
+
+        print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching portfolio: {e}{Colors.END}")
 
 
 def cmd_scan(args):
@@ -1778,14 +2247,41 @@ def main():
     book_parser = subparsers.add_parser('book', help='Get order book')
     book_parser.add_argument('coin', help='Asset to get order book for')
 
+    candles_parser = subparsers.add_parser('candles', help='Get OHLCV candlestick data')
+    candles_parser.add_argument('coin', help='Asset to get candles for')
+    candles_parser.add_argument('--interval', default='1h', help='Candle interval: 1m, 5m, 15m, 1h, 4h, 1d (default: 1h)')
+    candles_parser.add_argument('--lookback', default='7d', help='Lookback period: e.g., 24h, 7d, 2w (default: 7d)')
+
+    fh_parser = subparsers.add_parser('funding-history', help='Historical funding rates for a coin')
+    fh_parser.add_argument('coin', help='Asset to get funding history for')
+    fh_parser.add_argument('--lookback', default='7d', help='Lookback period: e.g., 24h, 7d, 2w (default: 7d)')
+
+    trades_parser = subparsers.add_parser('trades', help='Recent trades for a coin')
+    trades_parser.add_argument('coin', help='Asset to get recent trades for')
+    trades_parser.add_argument('--limit', type=int, default=20, help='Number of trades to show (default: 20)')
+
+    uf_parser = subparsers.add_parser('user-funding', help='Your funding payments received/paid')
+    uf_parser.add_argument('--lookback', default='7d', help='Lookback period: e.g., 24h, 7d, 2w (default: 7d)')
+
+    subparsers.add_parser('portfolio', help='Portfolio performance overview')
+
     # Trading commands
+    leverage_parser = subparsers.add_parser('leverage', help='Set leverage for an asset')
+    leverage_parser.add_argument('coin', help='Asset to set leverage for')
+    leverage_parser.add_argument('leverage', type=int, help='Leverage multiplier (e.g., 5 for 5x)')
+    leverage_parser.add_argument('--isolated', action='store_true', help='Use isolated margin (default: cross)')
+
     buy_parser = subparsers.add_parser('buy', help='Market buy')
     buy_parser.add_argument('coin', help='Asset to buy')
     buy_parser.add_argument('size', type=float, help='Size to buy')
+    buy_parser.add_argument('--leverage', type=int, help='Set leverage before order (e.g., 5 for 5x)')
+    buy_parser.add_argument('--isolated', action='store_true', help='Use isolated margin (default: cross)')
 
     sell_parser = subparsers.add_parser('sell', help='Market sell')
     sell_parser.add_argument('coin', help='Asset to sell')
     sell_parser.add_argument('size', type=float, help='Size to sell')
+    sell_parser.add_argument('--leverage', type=int, help='Set leverage before order (e.g., 5 for 5x)')
+    sell_parser.add_argument('--isolated', action='store_true', help='Use isolated margin (default: cross)')
 
     limit_buy_parser = subparsers.add_parser('limit-buy', help='Limit buy order')
     limit_buy_parser.add_argument('coin', help='Asset to buy')
@@ -1816,6 +2312,11 @@ def main():
     cancel_parser.add_argument('oid', help='Order ID to cancel')
 
     subparsers.add_parser('cancel-all', help='Cancel all open orders')
+
+    modify_parser = subparsers.add_parser('modify-order', help='Modify existing order price/size')
+    modify_parser.add_argument('oid', help='Order ID to modify')
+    modify_parser.add_argument('price', type=float, help='New price')
+    modify_parser.add_argument('--size', type=float, help='New size (default: keep current)')
 
     # Analysis commands
     analyze_parser = subparsers.add_parser('analyze', help='Comprehensive analysis with raw data')
@@ -1863,6 +2364,12 @@ def main():
         'price': cmd_price,
         'funding': cmd_funding,
         'book': cmd_book,
+        'candles': cmd_candles,
+        'funding-history': cmd_funding_history,
+        'trades': cmd_trades,
+        'user-funding': cmd_user_funding,
+        'portfolio': cmd_portfolio,
+        'leverage': cmd_leverage,
         'buy': cmd_buy,
         'sell': cmd_sell,
         'limit-buy': cmd_limit_buy,
@@ -1872,6 +2379,7 @@ def main():
         'close': cmd_close,
         'cancel': cmd_cancel,
         'cancel-all': cmd_cancel_all,
+        'modify-order': cmd_modify_order,
         'analyze': cmd_analyze,
         'raw': cmd_raw,
         'scan': cmd_scan,
