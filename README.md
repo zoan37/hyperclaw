@@ -2,7 +2,7 @@
 
 An [AgentSkills](https://agentskills.io)-compatible skill for trading perpetual futures on [Hyperliquid](https://hyperliquid.xyz). Works with Claude Code, OpenClaw, and any agent that supports the AgentSkills standard.
 
-Supports 228+ native crypto perps and HIP-3 builder-deployed perps (equities like TSLA, commodities like GOLD, and more).
+Supports 228+ native crypto perps, HIP-3 builder-deployed perps (equities like TSLA, commodities like GOLD), and market intelligence tools.
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ cp hyperclaw/.env.example hyperclaw/.env
 # Edit .env with your Hyperliquid API key
 
 # 4. Test
-hyperclaw/scripts/.venv/bin/python hyperclaw/scripts/hl.py price BTC
+hyperclaw/scripts/.venv/bin/python hyperclaw/scripts/hyperliquid_tools.py price BTC
 ```
 
 ## For AI Agents
@@ -27,11 +27,12 @@ See [SKILL.md](SKILL.md) for the full command reference and usage instructions t
 
 ## Commands
 
-- **Account:** `status`, `positions`, `orders`, `fills`, `order-history`, `funding-payments`, `fees`, `portfolio`
-- **Market Data:** `price`, `funding`, `book`, `candles`, `funding-history`, `predicted-fundings`, `trades`, `max-trade-size`, `inspect`, `scan`, `analyze`, `raw`
-- **Spot:** `spot-balances`, `spot-meta`
-- **HIP-3:** `hip3`, `dexes`
-- **Trading:** `buy`, `sell`, `limit-buy`, `limit-sell`, `stop-loss`, `take-profit`, `close`, `cancel`, `cancel-all`, `leverage`, `margin`, `modify-order`, `schedule-cancel`
+- **Account:** `status`, `positions`, `orders`
+- **Market Data:** `price`, `funding`, `book`, `raw`
+- **Analysis:** `analyze`, `scan`, `hip3`, `dexes`, `history`
+- **Trading:** `buy`, `sell`, `limit-buy`, `limit-sell`, `stop-loss`, `take-profit`, `close`, `cancel`, `cancel-all`
+- **Intelligence (requires Grok API):** `sentiment`, `unlocks`, `devcheck`
+- **Prediction Markets:** `polymarket`
 
 ## License
 
