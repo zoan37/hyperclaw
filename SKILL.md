@@ -147,7 +147,7 @@ HL_PROXY_URL=http://localhost:18731 {baseDir}/scripts/.venv/bin/python {baseDir}
 | `GET /cache/stats` | Cache hit/miss rates per type |
 | `POST /cache/clear` | Clear cache (optional body: `{"type":"..."}` or `{"user":"0x..."}`) |
 
-The proxy caches `/info` responses (metadata 300s, prices 5s, user state 2s) and passes `/exchange` through directly, automatically invalidating user cache on successful trades. Responses include `X-Cache: HIT` or `X-Cache: MISS` headers.
+The proxy caches `/info` read responses (metadata 300s, prices 5s, user state 2s). Trading commands (`buy`, `sell`, `close`, etc.) always go directly to the real Hyperliquid API — they bypass the proxy entirely because the SDK requires the real URL for transaction signing. The proxy is a **read cache only**. Responses include `X-Cache: HIT` or `X-Cache: MISS` headers.
 
 **Proxy env vars:**
 

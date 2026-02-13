@@ -67,12 +67,14 @@ def get_config(require_credentials: bool = True):
         print(f"  HL_TESTNET=true           # Optional: use testnet")
         sys.exit(1)
 
-    api_url = os.getenv('HL_PROXY_URL') or (constants.TESTNET_API_URL if use_testnet else constants.MAINNET_API_URL)
+    base_api_url = constants.TESTNET_API_URL if use_testnet else constants.MAINNET_API_URL
+    api_url = os.getenv('HL_PROXY_URL') or base_api_url
 
     return {
         'account_address': account_address or '',
         'secret_key': secret_key or '',
         'api_url': api_url,
+        'base_api_url': base_api_url,
         'is_testnet': use_testnet
     }
 
@@ -110,8 +112,10 @@ def setup_exchange(skip_ws: bool = True, include_hip3: bool = True) -> tuple:
     wallet = Account.from_key(config['secret_key'])
     # Fetch all available HIP-3 dexes dynamically
     perp_dexs = get_all_dex_names(config['api_url']) if include_hip3 else None
-    # Exchange takes: wallet, base_url, vault_address=None, account_address=None, perp_dexs=None
-    exchange = Exchange(wallet, config['api_url'], account_address=config['account_address'], perp_dexs=perp_dexs)
+    # Exchange uses the real API URL (not proxy) so signing uses the correct chain domain.
+    # The SDK checks base_url == MAINNET_API_URL to determine mainnet vs testnet signing.
+    exchange = Exchange(wallet, config['base_api_url'], account_address=config['account_address'], perp_dexs=perp_dexs)
+    # Info client uses proxy URL for cached reads
     info = Info(config['api_url'], skip_ws=skip_ws, perp_dexs=perp_dexs)
     return exchange, info, config
 
@@ -783,7 +787,7 @@ def cmd_cancel(args):
         coin = order.get('coin')
         print(f"\n{Colors.BOLD}Canceling order {oid} ({coin}){Colors.END}")
 
-        result = exchange.cancel(coin, oid)
+        result = exchange.cancel(coin, int(oid))
 
         if result.get('status') == 'ok':
             print(f"{Colors.GREEN}Order canceled!{Colors.END}")
@@ -813,7 +817,7 @@ def cmd_cancel_all(args):
             coin = order.get('coin')
             oid = order.get('oid')
             try:
-                result = exchange.cancel(coin, oid)
+                result = exchange.cancel(coin, int(oid))
                 if result.get('status') == 'ok':
                     print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
                 else:
