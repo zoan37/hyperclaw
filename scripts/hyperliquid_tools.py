@@ -246,7 +246,9 @@ def cmd_positions(args):
             if leverage:
                 lev_type = leverage.get('type', 'unknown')
                 lev_val = leverage.get('value', 0)
-                print(f"  Leverage:       {lev_val}x ({lev_type})")
+                max_lev = _get_max_leverage(info, coin)
+                max_str = f" / max {max_lev}x" if max_lev else ""
+                print(f"  Leverage:       {lev_val}x ({lev_type}{max_str})")
             if liq_px:
                 print(f"  Liquidation:    {format_price(liq_px)}")
 
@@ -439,6 +441,70 @@ def cmd_orders(args):
 # TRADING COMMANDS
 # ============================================================================
 
+def _set_leverage(exchange, coin, leverage, is_cross=True):
+    """Set leverage for an asset before trading."""
+    margin_type = "cross" if is_cross else "isolated"
+    try:
+        result = exchange.update_leverage(leverage, coin, is_cross)
+        if result.get('status') == 'ok':
+            print(f"  Leverage set: {leverage}x ({margin_type})")
+        else:
+            print(f"{Colors.RED}Failed to set leverage: {result}{Colors.END}")
+            return False
+    except Exception as e:
+        print(f"{Colors.RED}Error setting leverage: {e}{Colors.END}")
+        return False
+    return True
+
+
+def _get_max_leverage(info, coin):
+    """Get max leverage for an asset from metadata."""
+    try:
+        # Check native perps
+        meta = info.meta()
+        for asset in meta.get('universe', []):
+            if asset['name'] == coin:
+                return asset.get('maxLeverage')
+        # Check HIP-3 dexes
+        if ':' in coin:
+            dex = coin.split(':')[0]
+            meta = info.meta(dex=dex)
+            for asset in meta.get('universe', []):
+                if asset['name'] == coin:
+                    return asset.get('maxLeverage')
+    except Exception:
+        pass
+    return None
+
+
+def cmd_leverage(args):
+    """Set leverage for an asset."""
+    exchange, info, config = setup_exchange()
+    coin = args.coin
+    leverage = args.leverage
+    is_cross = not args.isolated
+
+    max_lev = _get_max_leverage(info, coin)
+    margin_type = "cross" if is_cross else "isolated"
+    max_str = f" (max: {max_lev}x)" if max_lev else ""
+
+    print(f"\n{Colors.BOLD}Setting {coin} leverage: {leverage}x ({margin_type}){max_str}{Colors.END}")
+
+    if max_lev and leverage > max_lev:
+        print(f"{Colors.RED}Error: {leverage}x exceeds max leverage of {max_lev}x for {coin}{Colors.END}")
+        return
+
+    try:
+        result = exchange.update_leverage(leverage, coin, is_cross)
+        if result.get('status') == 'ok':
+            print(f"{Colors.GREEN}Leverage updated!{Colors.END}")
+            print(f"  {coin}: {leverage}x {margin_type}")
+        else:
+            print(f"{Colors.RED}Failed: {result}{Colors.END}")
+    except Exception as e:
+        print(f"{Colors.RED}Error: {e}{Colors.END}")
+
+
 def cmd_buy(args):
     """Market buy."""
     exchange, info, config = setup_exchange()
@@ -450,6 +516,11 @@ def cmd_buy(args):
         print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
 
     try:
+        # Set leverage if specified
+        if args.leverage:
+            if not _set_leverage(exchange, coin, args.leverage, not getattr(args, 'isolated', False)):
+                return
+
         # Get current price for reference
         all_mids = info.all_mids()
         if coin in all_mids:
@@ -489,6 +560,11 @@ def cmd_sell(args):
         print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
 
     try:
+        # Set leverage if specified
+        if args.leverage:
+            if not _set_leverage(exchange, coin, args.leverage, not getattr(args, 'isolated', False)):
+                return
+
         # Get current price for reference
         all_mids = info.all_mids()
         if coin in all_mids:
@@ -1779,13 +1855,22 @@ def main():
     book_parser.add_argument('coin', help='Asset to get order book for')
 
     # Trading commands
+    leverage_parser = subparsers.add_parser('leverage', help='Set leverage for an asset')
+    leverage_parser.add_argument('coin', help='Asset to set leverage for')
+    leverage_parser.add_argument('leverage', type=int, help='Leverage multiplier (e.g., 5 for 5x)')
+    leverage_parser.add_argument('--isolated', action='store_true', help='Use isolated margin (default: cross)')
+
     buy_parser = subparsers.add_parser('buy', help='Market buy')
     buy_parser.add_argument('coin', help='Asset to buy')
     buy_parser.add_argument('size', type=float, help='Size to buy')
+    buy_parser.add_argument('--leverage', type=int, help='Set leverage before order (e.g., 5 for 5x)')
+    buy_parser.add_argument('--isolated', action='store_true', help='Use isolated margin (default: cross)')
 
     sell_parser = subparsers.add_parser('sell', help='Market sell')
     sell_parser.add_argument('coin', help='Asset to sell')
     sell_parser.add_argument('size', type=float, help='Size to sell')
+    sell_parser.add_argument('--leverage', type=int, help='Set leverage before order (e.g., 5 for 5x)')
+    sell_parser.add_argument('--isolated', action='store_true', help='Use isolated margin (default: cross)')
 
     limit_buy_parser = subparsers.add_parser('limit-buy', help='Limit buy order')
     limit_buy_parser.add_argument('coin', help='Asset to buy')
@@ -1863,6 +1948,7 @@ def main():
         'price': cmd_price,
         'funding': cmd_funding,
         'book': cmd_book,
+        'leverage': cmd_leverage,
         'buy': cmd_buy,
         'sell': cmd_sell,
         'limit-buy': cmd_limit_buy,

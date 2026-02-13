@@ -77,8 +77,12 @@ XAI_API_KEY=xai-...
 
 | Command | Description | Example |
 |---------|-------------|---------|
+| `leverage COIN LEV` | Set leverage for an asset (persists on Hyperliquid) | `hyperliquid_tools.py leverage SOL 5` |
+| `leverage COIN LEV --isolated` | Set leverage with isolated margin | `hyperliquid_tools.py leverage xyz:TSLA 3 --isolated` |
 | `buy COIN SIZE` | Market buy (long) | `hyperliquid_tools.py buy SOL 0.5` |
+| `buy COIN SIZE --leverage LEV` | Market buy with leverage set first | `hyperliquid_tools.py buy SOL 0.5 --leverage 5` |
 | `sell COIN SIZE` | Market sell (short) | `hyperliquid_tools.py sell SOL 0.5` |
+| `sell COIN SIZE --leverage LEV` | Market sell with leverage set first | `hyperliquid_tools.py sell SOL 0.5 --leverage 5` |
 | `limit-buy COIN SIZE PRICE` | Limit buy order (GTC) | `hyperliquid_tools.py limit-buy SOL 1 120` |
 | `limit-sell COIN SIZE PRICE` | Limit sell order (GTC) | `hyperliquid_tools.py limit-sell SOL 1 140` |
 | `stop-loss COIN SIZE TRIGGER` | Stop-loss trigger (market, reduce-only) | `hyperliquid_tools.py stop-loss SOL 0.5 115` |
@@ -86,6 +90,8 @@ XAI_API_KEY=xai-...
 | `close COIN` | Close entire position (supports HIP-3) | `hyperliquid_tools.py close SOL` |
 | `cancel OID` | Cancel specific order | `hyperliquid_tools.py cancel 12345` |
 | `cancel-all` | Cancel all open orders | `hyperliquid_tools.py cancel-all` |
+
+**Leverage:** Leverage is set per-asset on your Hyperliquid account and persists until changed. Each asset has a max leverage (e.g., BTC=40x, ETH=25x, SOL=20x). The `leverage` command and `--leverage` flag show the max and block if exceeded. Use `positions` to see current leverage on open positions. HIP-3 assets require isolated margin (`--isolated`).
 
 ### Intelligence (requires XAI_API_KEY)
 
