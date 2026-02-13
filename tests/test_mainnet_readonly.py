@@ -224,6 +224,25 @@ class TestAnalyze:
 
 
 # ============================================================================
+# LEVERAGE (max leverage check only — no account changes)
+# ============================================================================
+
+
+class TestLeverage:
+    def test_leverage_exceeds_max(self):
+        """leverage should reject values above max."""
+        rc, out, err = run_cli("leverage", "SOL", "999")
+        assert rc == 0  # exits cleanly with error message
+        assert "exceeds max leverage" in out
+
+    def test_leverage_shows_max(self):
+        """leverage should display max leverage for the asset."""
+        rc, out, err = run_cli("leverage", "BTC", "999")
+        assert rc == 0
+        assert "max:" in out
+
+
+# ============================================================================
 # CLI BASICS
 # ============================================================================
 
