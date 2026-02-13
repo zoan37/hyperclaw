@@ -67,7 +67,7 @@ def get_config(require_credentials: bool = True):
         print(f"  HL_TESTNET=true           # Optional: use testnet")
         sys.exit(1)
 
-    api_url = constants.TESTNET_API_URL if use_testnet else constants.MAINNET_API_URL
+    api_url = os.getenv('HL_PROXY_URL') or (constants.TESTNET_API_URL if use_testnet else constants.MAINNET_API_URL)
 
     return {
         'account_address': account_address or '',

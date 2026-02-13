@@ -117,6 +117,46 @@ hyperliquid_tools.py funding xyz:TSLA vntl:SPACEX km:US500
 - Thinner order books (wider spreads)
 - Max leverage varies by asset (10x for most equities, 20x for commodities/metals)
 
+## Caching Proxy (Recommended)
+
+Each CLI invocation cold-starts the SDK and burns ~40 API weight units just to initialize. With a 1200 weight/min IP limit, agents hit rate limits after ~30 commands. The caching proxy eliminates this.
+
+**Start the proxy before running commands:**
+
+```bash
+{baseDir}/scripts/.venv/bin/python {baseDir}/scripts/server.py &
+```
+
+Then set `HL_PROXY_URL` so all commands route through it:
+
+```bash
+export HL_PROXY_URL=http://localhost:18731
+```
+
+Or prefix individual commands:
+
+```bash
+HL_PROXY_URL=http://localhost:18731 {baseDir}/scripts/.venv/bin/python {baseDir}/scripts/hyperliquid_tools.py price BTC
+```
+
+**Proxy endpoints:**
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /health` | Check proxy status and uptime |
+| `GET /cache/stats` | Cache hit/miss rates per type |
+| `POST /cache/clear` | Clear cache (optional body: `{"type":"..."}` or `{"user":"0x..."}`) |
+
+The proxy caches `/info` responses (metadata 300s, prices 5s, user state 2s) and passes `/exchange` through directly, automatically invalidating user cache on successful trades. Responses include `X-Cache: HIT` or `X-Cache: MISS` headers.
+
+**Proxy env vars:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HL_UPSTREAM_URL` | `https://api.hyperliquid.xyz` | Upstream API |
+| `HL_PROXY_PORT` | `18731` | Proxy port |
+| `HL_CACHE_WARMUP` | `true` | Pre-warm cache on startup |
+
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -124,6 +164,7 @@ hyperliquid_tools.py funding xyz:TSLA vntl:SPACEX km:US500
 | `HL_ACCOUNT_ADDRESS` | For trading/status | Hyperliquid wallet address |
 | `HL_SECRET_KEY` | For trading | API wallet private key |
 | `HL_TESTNET` | No | `true` for testnet (default), `false` for mainnet |
+| `HL_PROXY_URL` | No | Caching proxy URL (e.g. `http://localhost:18731`) |
 | `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck |
 
 **Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`, `raw`, `polymarket`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY`.
