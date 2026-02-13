@@ -2,6 +2,12 @@
 name: hyperclaw
 description: Trade on Hyperliquid. Supports 228+ perps, HIP-3 equity/commodity perps (TSLA, GOLD), market scanning, sentiment analysis, and prediction market data. Commands for account status, market data, funding rates, order book, trading, and intelligence gathering.
 user-invocable: true
+metadata:
+  openclaw:
+    requires:
+      env:
+        - HL_ACCOUNT_ADDRESS
+        - HL_SECRET_KEY
 ---
 
 # HyperClaw - Hyperliquid Trading Skill
