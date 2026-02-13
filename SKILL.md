@@ -1,12 +1,12 @@
 ---
 name: hyperclaw
-description: Trade on Hyperliquid. Supports 228+ perps, HIP-3 equity/commodity perps (TSLA, GOLD), and 270+ spot pairs. Commands for account status, market data, funding rates, order book, spot/perps trading, and market scanning.
+description: Trade on Hyperliquid. Supports 228+ perps, HIP-3 equity/commodity perps (TSLA, GOLD), market scanning, sentiment analysis, and prediction market data. Commands for account status, market data, funding rates, order book, trading, and intelligence gathering.
 user-invocable: true
 ---
 
 # HyperClaw - Hyperliquid Trading Skill
 
-Trade on Hyperliquid via CLI. Covers native crypto perps (BTC, ETH, SOL, etc.), HIP-3 builder-deployed perps (equities, commodities, forex), and spot token trading (270+ pairs).
+Trade on Hyperliquid via CLI. Covers native crypto perps (BTC, ETH, SOL, etc.), HIP-3 builder-deployed perps (equities, commodities, forex), market scanning, and intelligence tools.
 
 ## Setup
 
@@ -20,18 +20,21 @@ Then configure `.env` in the skill root directory with your Hyperliquid API cred
 
 ```
 HL_ACCOUNT_ADDRESS=0x_your_wallet_address
-HL_API_WALLET_KEY=0x_your_api_wallet_private_key
+HL_SECRET_KEY=0x_your_api_wallet_private_key
 HL_TESTNET=true
 ```
 
 Get API keys from: https://app.hyperliquid.xyz/API — use a separate API wallet, not your main wallet private key.
 
-To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
+Optional for intelligence commands (sentiment, unlocks, devcheck):
+```
+XAI_API_KEY=xai-...
+```
 
 ## How to Run Commands
 
 ```bash
-{baseDir}/scripts/.venv/bin/python {baseDir}/scripts/hl.py <command> [args]
+{baseDir}/scripts/.venv/bin/python {baseDir}/scripts/hyperliquid_tools.py <command> [args]
 ```
 
 ## Command Reference
@@ -40,81 +43,69 @@ To point to a custom `.env` location, set `HYPERCLAW_ENV=/path/to/.env`.
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `status` | Account balance, positions, PnL | `hl.py status` |
-| `positions` | Detailed position info (leverage, liquidation) | `hl.py positions` |
-| `orders` | Open orders with TP/SL trigger details | `hl.py orders` |
-| `funding-payments` | Funding payments received/paid (USD) | `hl.py funding-payments --days 7` |
-| `fills` | Trade fills from API | `hl.py fills --limit 50` |
-| `portfolio` | Account value and PnL over time | `hl.py portfolio` |
-| `fees` | Fee schedule, volume tier, maker/taker rates | `hl.py fees` |
-| `order-history` | Full order history with statuses (filled/canceled/rejected) | `hl.py order-history --limit 50` |
+| `status` | Account balance, positions, PnL (includes HIP-3) | `hyperliquid_tools.py status` |
+| `positions` | Detailed position info (leverage, liquidation) | `hyperliquid_tools.py positions` |
+| `orders` | Open orders | `hyperliquid_tools.py orders` |
 
 ### Market Data
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `price [COINS...]` | Current prices | `hl.py price BTC ETH SOL` |
-| `funding [COINS...]` | Funding rates (hourly + APR) | `hl.py funding BTC SOL DOGE` |
-| `book COIN` | L2 order book with spread | `hl.py book SOL` |
-| `candles COIN` | Historical OHLCV price candles | `hl.py candles BTC --interval 1d --count 30` |
-| `funding-history COIN` | Funding rate history with trend | `hl.py funding-history SOL --days 7` |
-| `scan` | Scan all perps (funding, 24h change, OI, oracle divergence, OI caps) | `hl.py scan --top 30 --min-volume 1000000` |
-| `analyze [COINS...]` | Comprehensive market data dump | `hl.py analyze BTC ETH SOL` |
-| `predicted-fundings [COINS]` | Predicted next funding (HL, Binance, Bybit) | `hl.py predicted-fundings BTC ETH` |
-| `trades COIN` | Recent trades with buy/sell flow | `hl.py trades BTC` |
-| `max-trade-size COIN` | Available margin to trade per direction | `hl.py max-trade-size SOL` |
-| `inspect ADDR` | View any wallet's positions (all dexes) | `hl.py inspect 0x1234...` |
-| `raw COIN` | Raw JSON data for processing | `hl.py raw BTC` |
+| `price [COINS...]` | Current prices (supports HIP-3 dex prefix) | `hyperliquid_tools.py price BTC ETH xyz:TSLA` |
+| `funding [COINS...]` | Funding rates (hourly + APR + signal) | `hyperliquid_tools.py funding BTC SOL DOGE` |
+| `book COIN` | L2 order book with spread | `hyperliquid_tools.py book SOL` |
+| `raw COIN` | Raw JSON data dump for processing | `hyperliquid_tools.py raw BTC` |
 
-### Spot Trading
-
-Spot uses the same `buy`/`sell`/`limit-buy`/`limit-sell`/`close`/`cancel` commands as perps. The coin name is either `TOKEN/USDC` (e.g., `PURR/USDC`) for canonical pairs or `@N` (e.g., `@8`) for non-canonical pairs.
+### Analysis
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `spot-balances` | Spot token balances | `hl.py spot-balances` |
-| `spot-meta` | List all spot pairs sorted by volume | `hl.py spot-meta --top 20 --min-volume 10000` |
-| `buy PURR/USDC 100` | Buy 100 PURR on spot | `hl.py buy PURR/USDC 100` |
-| `price PURR/USDC @1` | Spot prices | `hl.py price PURR/USDC @1` |
-| `book PURR/USDC` | Spot order book | `hl.py book PURR/USDC` |
-| `candles PURR/USDC` | Spot price history | `hl.py candles PURR/USDC --interval 1d` |
-| `trades PURR/USDC` | Recent spot trades | `hl.py trades PURR/USDC` |
-
-### HIP-3 (Equity/Commodity Perps)
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `hip3 [COIN]` | HIP-3 perp data (price, spread, funding) | `hl.py hip3 TSLA` |
-| `hip3` | All HIP-3 dex assets (all dexes) | `hl.py hip3` |
-| `dexes` | List all HIP-3 dexes and their assets | `hl.py dexes` |
+| `analyze [COINS...]` | Comprehensive market analysis (prices, funding, OI, volume, book depth) | `hyperliquid_tools.py analyze BTC ETH SOL` |
+| `scan` | Scan all perps for funding opportunities | `hyperliquid_tools.py scan --top 20 --min-volume 100000` |
+| `hip3 [COIN]` | HIP-3 perp data (price, spread, funding) | `hyperliquid_tools.py hip3 TSLA` |
+| `hip3` | All HIP-3 dex assets | `hyperliquid_tools.py hip3` |
+| `dexes` | List all HIP-3 dexes and their assets | `hyperliquid_tools.py dexes` |
+| `history` | Trade history from API | `hyperliquid_tools.py history --limit 20` |
 
 ### Trading
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `buy COIN SIZE` | Market buy (long) | `hl.py buy SOL 0.5` |
-| `sell COIN SIZE` | Market sell (short) | `hl.py sell SOL 0.5` |
-| `limit-buy COIN SIZE PRICE` | Limit buy order | `hl.py limit-buy SOL 1 120` |
-| `limit-sell COIN SIZE PRICE` | Limit sell order | `hl.py limit-sell SOL 1 140` |
-| `stop-loss COIN SIZE TRIGGER` | Stop-loss trigger (market) | `hl.py stop-loss SOL 0.5 115` |
-| `take-profit COIN SIZE TRIGGER` | Take-profit trigger (market) | `hl.py take-profit SOL 0.5 150` |
-| `close COIN` | Close entire position | `hl.py close SOL` |
-| `cancel OID` | Cancel specific order | `hl.py cancel 12345` |
-| `cancel-all` | Cancel all open orders | `hl.py cancel-all` |
-| `leverage COIN LEV` | Set leverage (1 to max) | `hl.py leverage xyz:TSLA 3` |
-| `margin COIN AMOUNT` | Add/remove margin on isolated position | `hl.py margin xyz:TSLA 10` |
-| `modify-order OID` | Modify existing order price/size | `hl.py modify-order 123 --price 130` |
-| `schedule-cancel [MIN]` | Dead man's switch - auto-cancel orders | `hl.py schedule-cancel 60` |
+| `buy COIN SIZE` | Market buy (long) | `hyperliquid_tools.py buy SOL 0.5` |
+| `sell COIN SIZE` | Market sell (short) | `hyperliquid_tools.py sell SOL 0.5` |
+| `limit-buy COIN SIZE PRICE` | Limit buy order (GTC) | `hyperliquid_tools.py limit-buy SOL 1 120` |
+| `limit-sell COIN SIZE PRICE` | Limit sell order (GTC) | `hyperliquid_tools.py limit-sell SOL 1 140` |
+| `stop-loss COIN SIZE TRIGGER` | Stop-loss trigger (market, reduce-only) | `hyperliquid_tools.py stop-loss SOL 0.5 115` |
+| `take-profit COIN SIZE TRIGGER` | Take-profit trigger (market, reduce-only) | `hyperliquid_tools.py take-profit SOL 0.5 150` |
+| `close COIN` | Close entire position (supports HIP-3) | `hyperliquid_tools.py close SOL` |
+| `cancel OID` | Cancel specific order | `hyperliquid_tools.py cancel 12345` |
+| `cancel-all` | Cancel all open orders | `hyperliquid_tools.py cancel-all` |
+
+### Intelligence (requires XAI_API_KEY)
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `sentiment COIN` | Grok web + X/Twitter sentiment analysis | `hyperliquid_tools.py sentiment BTC` |
+| `unlocks [COINS...]` | Token unlock schedules (defaults to current positions) | `hyperliquid_tools.py unlocks SOL HYPE` |
+| `devcheck COIN` | Developer sentiment and exodus signals | `hyperliquid_tools.py devcheck SOL` |
+
+### Prediction Markets
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `polymarket [CATEGORY]` | Polymarket prediction data | `hyperliquid_tools.py polymarket crypto` |
+
+Categories: `crypto`, `btc`, `eth`, `trending`, `macro`
 
 ### HIP-3 Trading
 
 HIP-3 assets use a dex prefix: `dex:SYMBOL`
 
 ```bash
-hl.py buy xyz:TSLA 1          # Buy TSLA on xyz dex
-hl.py sell vntl:ANTHROPIC 1   # Sell ANTHROPIC on vntl dex
-hl.py close xyz:GOLD          # Close GOLD position
-hl.py funding xyz:TSLA vntl:SPACEX km:US500
+hyperliquid_tools.py buy xyz:TSLA 1          # Buy TSLA on xyz dex
+hyperliquid_tools.py sell vntl:ANTHROPIC 1   # Sell ANTHROPIC on vntl dex
+hyperliquid_tools.py close xyz:GOLD          # Close GOLD position
+hyperliquid_tools.py funding xyz:TSLA vntl:SPACEX km:US500
 ```
 
 **Known HIP-3 dexes:** xyz (equities, commodities), vntl (private companies), flx (crypto/commodities), hyna (crypto), km (indices), abcd, cash. Use `dexes` command to discover all available dexes dynamically.
@@ -124,15 +115,15 @@ hl.py funding xyz:TSLA vntl:SPACEX km:US500
 - Per-position liquidation prices
 - Higher fees (2x normal)
 - Thinner order books (wider spreads)
-- Max leverage varies by asset (10x for most equities, 20x for commodities/metals). **The displayed leverage is the maximum, not fixed.** Use `leverage` command to set lower leverage before entering a position (e.g., `hl.py leverage xyz:TSLA 3` for 3x instead of 10x). Lower leverage = more margin = further liquidation price.
+- Max leverage varies by asset (10x for most equities, 20x for commodities/metals)
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `HL_ACCOUNT_ADDRESS` | For trading/status | Hyperliquid wallet address |
-| `HL_API_WALLET_KEY` | For trading | API wallet private key |
+| `HL_SECRET_KEY` | For trading | API wallet private key |
 | `HL_TESTNET` | No | `true` for testnet (default), `false` for mainnet |
-| `HYPERCLAW_ENV` | No | Custom path to `.env` file |
+| `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck |
 
-**Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_API_WALLET_KEY`.
+**Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`, `raw`, `polymarket`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY`.
