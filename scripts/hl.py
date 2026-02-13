@@ -240,6 +240,7 @@ def cmd_status(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching account status: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_positions(args):
@@ -286,6 +287,7 @@ def cmd_positions(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching positions: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_price(args):
@@ -317,6 +319,7 @@ def cmd_price(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching prices: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_funding(args):
@@ -392,6 +395,7 @@ def cmd_funding(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching funding rates: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_book(args):
@@ -426,6 +430,7 @@ def cmd_book(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching order book: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_orders(args):
@@ -483,6 +488,7 @@ def cmd_orders(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching orders: {e}{Colors.END}")
+        sys.exit(1)
 
 
 # ============================================================================
@@ -521,9 +527,11 @@ def cmd_buy(args):
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error executing buy: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_sell(args):
@@ -557,9 +565,11 @@ def cmd_sell(args):
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error executing sell: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_limit_buy(args):
@@ -597,9 +607,11 @@ def cmd_limit_buy(args):
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error placing limit buy: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_limit_sell(args):
@@ -637,9 +649,11 @@ def cmd_limit_sell(args):
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error placing limit sell: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_stop_loss(args):
@@ -682,7 +696,7 @@ def cmd_stop_loss(args):
             is_buy = trigger_price > current_price
         else:
             print(f"{Colors.RED}Error: No position found and no price available for {coin}. Use --buy to force buy side.{Colors.END}")
-            return
+            sys.exit(1)
 
         order_type = {
             "trigger": {
@@ -709,9 +723,11 @@ def cmd_stop_loss(args):
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error placing stop-loss: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_take_profit(args):
@@ -753,7 +769,7 @@ def cmd_take_profit(args):
             is_buy = trigger_price < current_price
         else:
             print(f"{Colors.RED}Error: No position found and no price available for {coin}. Use --buy to force buy side.{Colors.END}")
-            return
+            sys.exit(1)
 
         order_type = {
             "trigger": {
@@ -780,9 +796,11 @@ def cmd_take_profit(args):
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error placing take-profit: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_close(args):
@@ -813,7 +831,7 @@ def cmd_close(args):
 
         if not position or float(position['szi']) == 0:
             print(f"{Colors.YELLOW}No open position for {coin}{Colors.END}")
-            return
+            sys.exit(1)
 
         size = float(position['szi'])
         entry_px = float(position['entryPx'])
@@ -837,9 +855,11 @@ def cmd_close(args):
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Close failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error closing position: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_cancel(args):
@@ -858,7 +878,7 @@ def cmd_cancel(args):
 
         if not order:
             print(f"{Colors.YELLOW}Order {oid} not found in open orders{Colors.END}")
-            return
+            sys.exit(1)
 
         coin = order.get('coin')
         print(f"\n{Colors.BOLD}Canceling order {oid} ({coin}){Colors.END}")
@@ -869,9 +889,11 @@ def cmd_cancel(args):
             print(f"{Colors.GREEN}Order canceled!{Colors.END}")
         else:
             print(f"{Colors.RED}Cancel failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error canceling order: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_funding_history(args):
@@ -942,6 +964,7 @@ def cmd_funding_history(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching funding history: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_portfolio(args):
@@ -990,6 +1013,7 @@ def cmd_portfolio(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching portfolio: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_candles(args):
@@ -1052,6 +1076,7 @@ def cmd_candles(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching candles: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_leverage(args):
@@ -1079,7 +1104,7 @@ def cmd_leverage(args):
                     margin_mode = asset.get('marginMode', '')
                     if max_lev and leverage > max_lev:
                         print(f"{Colors.RED}Error: {coin} max leverage is {max_lev}x{Colors.END}")
-                        return
+                        sys.exit(1)
                     if margin_mode in ('strictIsolated', 'noCross'):
                         is_cross = False
                     print(f"  Max leverage: {max_lev}x | Mode: {'cross' if is_cross else 'isolated'}")
@@ -1094,9 +1119,11 @@ def cmd_leverage(args):
             print(f"\n{Colors.GREEN}Leverage set to {leverage}x ({mode})!{Colors.END}")
         else:
             print(f"\n{Colors.RED}Failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error setting leverage: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_margin(args):
@@ -1117,9 +1144,11 @@ def cmd_margin(args):
             print(f"\n{Colors.GREEN}Margin updated! {action} ${abs(amount):.2f} on {coin}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error updating margin: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_modify_order(args):
@@ -1145,7 +1174,7 @@ def cmd_modify_order(args):
 
         if not order:
             print(f"{Colors.YELLOW}Order {oid} not found in open orders{Colors.END}")
-            return
+            sys.exit(1)
 
         coin = order.get('coin')
         is_buy = order.get('side') == 'B'
@@ -1166,9 +1195,11 @@ def cmd_modify_order(args):
             print(f"\n{Colors.GREEN}Order modified!{Colors.END}")
         else:
             print(f"\n{Colors.RED}Failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error modifying order: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_schedule_cancel(args):
@@ -1183,8 +1214,10 @@ def cmd_schedule_cancel(args):
                 print(f"{Colors.GREEN}Scheduled cancel cleared!{Colors.END}")
             else:
                 print(f"{Colors.RED}Failed: {result}{Colors.END}")
+                sys.exit(1)
         except Exception as e:
             print(f"{Colors.RED}Error: {e}{Colors.END}")
+            sys.exit(1)
         return
 
     minutes = args.minutes
@@ -1205,9 +1238,11 @@ def cmd_schedule_cancel(args):
             print(f"{Colors.DIM}Max 10 triggers per day. Use --clear to unset.{Colors.END}")
         else:
             print(f"\n{Colors.RED}Failed: {result}{Colors.END}")
+            sys.exit(1)
 
     except Exception as e:
         print(f"{Colors.RED}Error scheduling cancel: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_cancel_all(args):
@@ -1241,6 +1276,7 @@ def cmd_cancel_all(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error canceling orders: {e}{Colors.END}")
+        sys.exit(1)
 
 
 # ============================================================================
@@ -1262,7 +1298,7 @@ def cmd_predicted_fundings(args):
         resp = req.post(config['api_url'] + "/info", json={"type": "predictedFundings"}, timeout=10)
         if resp.status_code != 200:
             print(f"{Colors.RED}API error: {resp.status_code}{Colors.END}")
-            return
+            sys.exit(1)
 
         data = resp.json()
 
@@ -1313,6 +1349,7 @@ def cmd_predicted_fundings(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching predicted fundings: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_trades(args):
@@ -1332,7 +1369,7 @@ def cmd_trades(args):
         )
         if resp.status_code != 200:
             print(f"{Colors.RED}API error: {resp.status_code}{Colors.END}")
-            return
+            sys.exit(1)
 
         trades = resp.json()
 
@@ -1365,6 +1402,7 @@ def cmd_trades(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching trades: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_max_trade_size(args):
@@ -1383,7 +1421,7 @@ def cmd_max_trade_size(args):
         )
         if resp.status_code != 200:
             print(f"{Colors.RED}API error: {resp.status_code}{Colors.END}")
-            return
+            sys.exit(1)
 
         data = resp.json()
 
@@ -1395,6 +1433,7 @@ def cmd_max_trade_size(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching max trade size: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_funding_payments(args):
@@ -1450,6 +1489,7 @@ def cmd_funding_payments(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching user funding: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_spot_balances(args):
@@ -1482,6 +1522,7 @@ def cmd_spot_balances(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching spot balances: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_spot_meta(args):
@@ -1542,6 +1583,7 @@ def cmd_spot_meta(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching spot meta: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_inspect(args):
@@ -1606,6 +1648,7 @@ def cmd_inspect(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error inspecting address: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_fees(args):
@@ -1626,6 +1669,7 @@ def cmd_fees(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching fees: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_order_history(args):
@@ -1677,6 +1721,7 @@ def cmd_order_history(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching historical orders: {e}{Colors.END}")
+        sys.exit(1)
 
 
 # ============================================================================
@@ -1800,6 +1845,7 @@ def cmd_analyze(args):
         print(f"{Colors.RED}Error during analysis: {e}{Colors.END}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
 
 
 def cmd_raw(args):
@@ -1848,6 +1894,7 @@ def cmd_raw(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        sys.exit(1)
 
 
 def cmd_scan(args):
@@ -2002,6 +2049,7 @@ def cmd_scan(args):
         print(f"{Colors.RED}Error scanning: {e}{Colors.END}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
 
 
 def cmd_hip3(args):
@@ -2146,6 +2194,7 @@ def cmd_dexes(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching dexes: {e}{Colors.END}")
+        sys.exit(1)
 
     print()
 
@@ -2186,6 +2235,7 @@ def cmd_fills(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        sys.exit(1)
 
 
 # ============================================================================
@@ -2375,9 +2425,16 @@ def main():
     }
 
     if args.command in commands:
-        commands[args.command](args)
+        try:
+            commands[args.command](args)
+        except SystemExit:
+            raise
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
         parser.print_help()
+        sys.exit(1)
 
 
 if __name__ == '__main__':
