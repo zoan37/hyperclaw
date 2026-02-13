@@ -930,6 +930,66 @@ def cmd_cancel_all(args):
         print(f"{Colors.RED}Error canceling orders: {e}{Colors.END}")
 
 
+def cmd_modify_order(args):
+    """Modify an existing order's price and/or size."""
+    exchange, info, config = setup_exchange()
+    oid = int(args.oid)
+    new_price = args.price
+    new_size = getattr(args, 'size', None)
+
+    try:
+        # Find the existing order to get coin and side
+        open_orders = info.frontend_open_orders(config['account_address'])
+
+        order = None
+        for o in open_orders:
+            if o.get('oid') == oid:
+                order = o
+                break
+
+        if not order:
+            print(f"{Colors.YELLOW}Order {oid} not found in open orders{Colors.END}")
+            return
+
+        coin = order['coin']
+        is_buy = order['side'] == 'B'
+        side_label = "Buy" if is_buy else "Sell"
+        current_sz = float(order['sz'])
+        current_px = float(order['limitPx'])
+        sz = new_size if new_size else current_sz
+
+        print(f"\n{Colors.BOLD}Modifying order {oid} ({coin}){Colors.END}")
+        print(f"  {side_label}: {current_sz} @ {format_price(current_px)} -> {sz} @ {format_price(new_price)}")
+
+        result = exchange.modify_order(
+            oid,
+            coin,
+            is_buy,
+            sz,
+            new_price,
+            {"limit": {"tif": "Gtc"}},
+        )
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'resting' in status:
+                    print(f"\n{Colors.GREEN}Order modified!{Colors.END}")
+                    print(f"  OID: {status['resting'].get('oid')}")
+                elif 'filled' in status:
+                    filled = status['filled']
+                    print(f"\n{Colors.GREEN}Modified order filled immediately!{Colors.END}")
+                    print(f"  Size: {filled.get('totalSz')}")
+                    print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Modify failed: {result}{Colors.END}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error modifying order: {e}{Colors.END}")
+
+
 def cmd_analyze(args):
     """Comprehensive market analysis with raw data for AI agent processing."""
     info, config = setup_info(require_credentials=False)
@@ -1334,6 +1394,122 @@ def cmd_trades(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching recent trades: {e}{Colors.END}")
+
+
+def cmd_user_funding(args):
+    """Show personal funding payments received/paid on positions."""
+    info, config = setup_info(require_credentials=True)
+    lookback = getattr(args, 'lookback', '7d')
+
+    # Parse lookback to ms
+    now_ms = int(datetime.now().timestamp() * 1000)
+    unit = lookback[-1].lower()
+    amount = int(lookback[:-1])
+    if unit == 'h':
+        start_ms = now_ms - (amount * 3600 * 1000)
+    elif unit == 'd':
+        start_ms = now_ms - (amount * 86400 * 1000)
+    elif unit == 'w':
+        start_ms = now_ms - (amount * 7 * 86400 * 1000)
+    else:
+        start_ms = now_ms - (7 * 86400 * 1000)
+
+    try:
+        data = info.user_funding_history(config['account_address'], start_ms, now_ms)
+        if not data:
+            print(f"No funding payments in the last {lookback}")
+            return
+
+        print(f"\n{Colors.BOLD}Your Funding Payments (last {lookback}){Colors.END}")
+        print("=" * 80)
+        print(f"  {'Time':<22} {'Coin':<12} {'Payment':>14} {'Position Size':>14}")
+        print(f"  {'-'*22} {'-'*12} {'-'*14} {'-'*14}")
+
+        total_funding = 0
+        by_coin = {}
+        for entry in data:
+            ts = datetime.fromtimestamp(entry['time'] / 1000).strftime('%Y-%m-%d %H:%M')
+            coin = entry.get('coin', entry.get('delta', {}).get('coin', '?'))
+            delta = entry.get('delta', {})
+            funding_delta = float(delta.get('usdc', 0))
+            szi = delta.get('szi', '?')
+            total_funding += funding_delta
+
+            if coin not in by_coin:
+                by_coin[coin] = 0
+            by_coin[coin] += funding_delta
+
+            color = Colors.GREEN if funding_delta >= 0 else Colors.RED
+            print(f"  {ts:<22} {coin:<12} {color}${funding_delta:>+13,.4f}{Colors.END} {szi:>14}")
+
+        # Summary
+        color = Colors.GREEN if total_funding >= 0 else Colors.RED
+        print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+        print(f"  Total funding:  {color}${total_funding:>+,.4f}{Colors.END}")
+        print(f"  Payments:       {len(data)}")
+        if by_coin:
+            print(f"\n  {Colors.BOLD}By coin:{Colors.END}")
+            for coin, amt in sorted(by_coin.items(), key=lambda x: abs(x[1]), reverse=True):
+                c = Colors.GREEN if amt >= 0 else Colors.RED
+                print(f"    {coin:<12} {c}${amt:>+,.4f}{Colors.END}")
+        print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching funding payments: {e}{Colors.END}")
+
+
+def cmd_portfolio(args):
+    """Show portfolio performance overview."""
+    info, config = setup_info(require_credentials=True)
+
+    try:
+        data = info.portfolio(config['account_address'])
+        if not data:
+            print("No portfolio data available")
+            return
+
+        print(f"\n{Colors.BOLD}Portfolio Performance{Colors.END}")
+        print("=" * 60)
+
+        # API returns [["day", {data}], ["week", {data}], ...] or dict
+        periods = {}
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, list) and len(item) == 2:
+                    periods[item[0]] = item[1]
+        elif isinstance(data, dict):
+            periods = data
+
+        labels = {'day': '24h', 'week': '7d', 'month': '30d', 'allTime': 'All Time'}
+        for period_key in ['day', 'week', 'month', 'allTime']:
+            period_data = periods.get(period_key)
+            if not period_data:
+                continue
+            label = labels.get(period_key, period_key)
+            vlm = float(period_data.get('vlm', 0))
+
+            # Extract PnL from pnlHistory
+            pnl_history = period_data.get('pnlHistory', [])
+            pnl = float(pnl_history[-1][1]) if pnl_history else 0
+
+            # Extract account value from history
+            acct_history = period_data.get('accountValueHistory', [])
+            acct_val = float(acct_history[-1][1]) if acct_history else 0
+            start_val = float(acct_history[0][1]) if acct_history else 0
+
+            pnl_color = Colors.GREEN if pnl >= 0 else Colors.RED
+            print(f"\n  {Colors.BOLD}{label}:{Colors.END}")
+            print(f"    Account:  ${acct_val:>,.2f}")
+            print(f"    PnL:      {pnl_color}${pnl:>+,.4f}{Colors.END}")
+            if start_val > 0:
+                pct = (pnl / start_val) * 100
+                print(f"    Return:   {pnl_color}{pct:>+.4f}%{Colors.END}")
+            print(f"    Volume:   ${vlm:>,.2f}")
+
+        print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching portfolio: {e}{Colors.END}")
 
 
 def cmd_scan(args):
@@ -2084,6 +2260,11 @@ def main():
     trades_parser.add_argument('coin', help='Asset to get recent trades for')
     trades_parser.add_argument('--limit', type=int, default=20, help='Number of trades to show (default: 20)')
 
+    uf_parser = subparsers.add_parser('user-funding', help='Your funding payments received/paid')
+    uf_parser.add_argument('--lookback', default='7d', help='Lookback period: e.g., 24h, 7d, 2w (default: 7d)')
+
+    subparsers.add_parser('portfolio', help='Portfolio performance overview')
+
     # Trading commands
     leverage_parser = subparsers.add_parser('leverage', help='Set leverage for an asset')
     leverage_parser.add_argument('coin', help='Asset to set leverage for')
@@ -2131,6 +2312,11 @@ def main():
     cancel_parser.add_argument('oid', help='Order ID to cancel')
 
     subparsers.add_parser('cancel-all', help='Cancel all open orders')
+
+    modify_parser = subparsers.add_parser('modify-order', help='Modify existing order price/size')
+    modify_parser.add_argument('oid', help='Order ID to modify')
+    modify_parser.add_argument('price', type=float, help='New price')
+    modify_parser.add_argument('--size', type=float, help='New size (default: keep current)')
 
     # Analysis commands
     analyze_parser = subparsers.add_parser('analyze', help='Comprehensive analysis with raw data')
@@ -2181,6 +2367,8 @@ def main():
         'candles': cmd_candles,
         'funding-history': cmd_funding_history,
         'trades': cmd_trades,
+        'user-funding': cmd_user_funding,
+        'portfolio': cmd_portfolio,
         'leverage': cmd_leverage,
         'buy': cmd_buy,
         'sell': cmd_sell,
@@ -2191,6 +2379,7 @@ def main():
         'close': cmd_close,
         'cancel': cmd_cancel,
         'cancel-all': cmd_cancel_all,
+        'modify-order': cmd_modify_order,
         'analyze': cmd_analyze,
         'raw': cmd_raw,
         'scan': cmd_scan,

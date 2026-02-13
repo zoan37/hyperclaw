@@ -58,6 +58,8 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | `status` | Account balance, positions, PnL (includes HIP-3) | `hyperliquid_tools.py status` |
 | `positions` | Detailed position info (leverage, liquidation) | `hyperliquid_tools.py positions` |
 | `orders` | Open orders | `hyperliquid_tools.py orders` |
+| `user-funding` | Your funding payments received/paid | `hyperliquid_tools.py user-funding --lookback 7d` |
+| `portfolio` | Portfolio performance (PnL, volume by period) | `hyperliquid_tools.py portfolio` |
 
 ### Market Data
 
@@ -99,6 +101,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | `close COIN` | Close entire position (supports HIP-3) | `hyperliquid_tools.py close SOL` |
 | `cancel OID` | Cancel specific order | `hyperliquid_tools.py cancel 12345` |
 | `cancel-all` | Cancel all open orders | `hyperliquid_tools.py cancel-all` |
+| `modify-order OID PRICE` | Modify existing order price/size | `hyperliquid_tools.py modify-order 12345 130.5 --size 2` |
 
 **Leverage:** Leverage is set per-asset on your Hyperliquid account and persists until changed. Each asset has a max leverage (e.g., BTC=40x, ETH=25x, SOL=20x). The `leverage` command and `--leverage` flag show the max and block if exceeded. Use `positions` to see current leverage on open positions. HIP-3 assets require isolated margin (`--isolated`).
 
