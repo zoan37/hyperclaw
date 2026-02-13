@@ -37,6 +37,12 @@ Optional for intelligence commands (sentiment, unlocks, devcheck):
 XAI_API_KEY=xai-...
 ```
 
+After configuring `.env`, start the caching proxy (prevents rate limiting):
+
+```bash
+{baseDir}/scripts/.venv/bin/python {baseDir}/scripts/server.py &
+```
+
 ## How to Run Commands
 
 ```bash
@@ -60,6 +66,7 @@ XAI_API_KEY=xai-...
 | `price [COINS...]` | Current prices (supports HIP-3 dex prefix) | `hyperliquid_tools.py price BTC ETH xyz:TSLA` |
 | `funding [COINS...]` | Funding rates (hourly + APR + signal) | `hyperliquid_tools.py funding BTC SOL DOGE` |
 | `book COIN` | L2 order book with spread | `hyperliquid_tools.py book SOL` |
+| `candles COIN` | OHLCV candlestick data with SMA | `hyperliquid_tools.py candles BTC --interval 1h --lookback 7d` |
 | `raw COIN` | Raw JSON data dump for processing | `hyperliquid_tools.py raw BTC` |
 
 ### Analysis
@@ -129,27 +136,17 @@ hyperliquid_tools.py funding xyz:TSLA vntl:SPACEX km:US500
 - Thinner order books (wider spreads)
 - Max leverage varies by asset (10x for most equities, 20x for commodities/metals)
 
-## Caching Proxy (Recommended)
+## Caching Proxy (Default — Start First)
 
-Each CLI invocation cold-starts the SDK and burns ~40 API weight units just to initialize. With a 1200 weight/min IP limit, agents hit rate limits after ~30 commands. The caching proxy eliminates this.
+Each CLI invocation cold-starts the SDK and burns ~40 API weight units just to initialize. With a 1200 weight/min IP limit, agents hit rate limits after ~30 commands. **Always start the proxy before running commands.**
 
-**Start the proxy before running commands:**
+**Start the proxy:**
 
 ```bash
 {baseDir}/scripts/.venv/bin/python {baseDir}/scripts/server.py &
 ```
 
-Then set `HL_PROXY_URL` so all commands route through it:
-
-```bash
-export HL_PROXY_URL=http://localhost:18731
-```
-
-Or prefix individual commands:
-
-```bash
-HL_PROXY_URL=http://localhost:18731 {baseDir}/scripts/.venv/bin/python {baseDir}/scripts/hyperliquid_tools.py price BTC
-```
+The `.env` file includes `HL_PROXY_URL=http://localhost:18731` by default. All read commands will route through the proxy automatically. To disable the proxy (not recommended), comment out or remove `HL_PROXY_URL` from `.env`.
 
 **Proxy endpoints:**
 
@@ -176,7 +173,7 @@ The proxy caches `/info` read responses (metadata 300s, prices 5s, user state 2s
 | `HL_ACCOUNT_ADDRESS` | For trading/status | Hyperliquid wallet address |
 | `HL_SECRET_KEY` | For trading | API wallet private key |
 | `HL_TESTNET` | No | `true` for testnet (default), `false` for mainnet |
-| `HL_PROXY_URL` | No | Caching proxy URL (e.g. `http://localhost:18731`) |
+| `HL_PROXY_URL` | Recommended | Caching proxy URL (default: `http://localhost:18731`) |
 | `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck |
 
 **Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`, `raw`, `polymarket`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY`.

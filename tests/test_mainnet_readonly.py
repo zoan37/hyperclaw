@@ -160,6 +160,28 @@ class TestRaw:
 
 
 # ============================================================================
+# CANDLES
+# ============================================================================
+
+
+class TestCandles:
+    def test_candles_btc(self):
+        """candles should show OHLCV data for BTC."""
+        rc, out, err = run_cli("candles", "BTC", "--interval", "1h", "--lookback", "24h")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Candles" in out
+        assert "Open" in out
+        assert "Summary" in out
+
+    def test_candles_default_lookback(self):
+        """candles with defaults should work."""
+        rc, out, err = run_cli("candles", "ETH")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Candles" in out
+        assert "SMA" in out
+
+
+# ============================================================================
 # HIP-3 / DEXES
 # ============================================================================
 

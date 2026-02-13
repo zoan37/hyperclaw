@@ -407,11 +407,11 @@ def cmd_book(args):
 
 
 def cmd_orders(args):
-    """List open orders."""
+    """List open orders with trigger/TP/SL details."""
     info, config = setup_info(require_credentials=True)
 
     try:
-        open_orders = info.open_orders(config['account_address'])
+        open_orders = info.frontend_open_orders(config['account_address'])
 
         print(f"\n{Colors.BOLD}Open Orders:{Colors.END}")
 
@@ -419,8 +419,8 @@ def cmd_orders(args):
             print(f"  {Colors.DIM}No open orders{Colors.END}")
             return
 
-        print(f"  {'OID':<12} {'Asset':<12} {'Side':<6} {'Size':>12} {'Price':>12} {'Type':<10}")
-        print("  " + "-" * 70)
+        print(f"  {'OID':<12} {'Asset':<12} {'Side':<6} {'Size':>12} {'Price':>12} {'Type':<12} {'Details'}")
+        print("  " + "-" * 85)
 
         for order in open_orders:
             oid = order.get('oid', 'N/A')
@@ -431,7 +431,22 @@ def cmd_orders(args):
             px = float(order.get('limitPx', 0))
             order_type = order.get('orderType', 'limit')
 
-            print(f"  {oid:<12} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>12} {format_price(px):>12} {order_type:<10}")
+            # Build details string from extra fields
+            details = []
+            if order.get('isTrigger'):
+                trigger_px = order.get('triggerPx', '')
+                trigger_cond = order.get('triggerCondition', '')
+                details.append(f"trigger@{trigger_px} {trigger_cond}")
+            if order.get('isPositionTpsl'):
+                details.append("TP/SL")
+            if order.get('reduceOnly'):
+                details.append("reduce-only")
+            tif = order.get('tif', '')
+            if tif and tif != 'Gtc':
+                details.append(tif)
+            detail_str = ", ".join(details) if details else ""
+
+            print(f"  {oid:<12} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>12} {format_price(px):>12} {order_type:<12} {detail_str}")
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching orders: {e}{Colors.END}")
@@ -875,7 +890,7 @@ def cmd_cancel(args):
 
 
 def cmd_cancel_all(args):
-    """Cancel all open orders."""
+    """Cancel all open orders in a single bulk request."""
     exchange, info, config = setup_exchange()
 
     print(f"\n{Colors.BOLD}Canceling all open orders{Colors.END}")
@@ -889,19 +904,27 @@ def cmd_cancel_all(args):
 
         print(f"Found {len(open_orders)} open orders")
 
-        for order in open_orders:
-            coin = order.get('coin')
-            oid = order.get('oid')
-            try:
-                result = exchange.cancel(coin, int(oid))
-                if result.get('status') == 'ok':
-                    print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
-                else:
-                    print(f"  {Colors.RED}Failed to cancel {coin} order {oid}{Colors.END}")
-            except Exception as e:
-                print(f"  {Colors.RED}Error canceling {coin} order {oid}: {e}{Colors.END}")
+        cancel_requests = [
+            {"coin": order.get('coin'), "oid": int(order.get('oid'))}
+            for order in open_orders
+        ]
 
-        print(f"\n{Colors.GREEN}Done!{Colors.END}")
+        result = exchange.bulk_cancel(cancel_requests)
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for i, status in enumerate(statuses):
+                coin = cancel_requests[i]['coin'] if i < len(cancel_requests) else '?'
+                oid = cancel_requests[i]['oid'] if i < len(cancel_requests) else '?'
+                if status == 'success':
+                    print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
+                elif isinstance(status, dict) and 'error' in status:
+                    print(f"  {Colors.RED}Failed {coin} order {oid}: {status['error']}{Colors.END}")
+                else:
+                    print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
+            print(f"\n{Colors.GREEN}Done!{Colors.END}")
+        else:
+            print(f"{Colors.RED}Bulk cancel failed: {result}{Colors.END}")
 
     except Exception as e:
         print(f"{Colors.RED}Error canceling orders: {e}{Colors.END}")
@@ -1117,6 +1140,85 @@ def cmd_raw(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+
+
+def cmd_candles(args):
+    """Get OHLCV candlestick data for technical analysis."""
+    info, config = setup_info()
+    coin = args.coin
+    interval = args.interval
+    lookback = args.lookback
+
+    # Parse lookback to milliseconds
+    now_ms = int(datetime.now().timestamp() * 1000)
+    unit = lookback[-1].lower()
+    amount = int(lookback[:-1])
+    if unit == 'h':
+        start_ms = now_ms - (amount * 3600 * 1000)
+    elif unit == 'd':
+        start_ms = now_ms - (amount * 86400 * 1000)
+    elif unit == 'w':
+        start_ms = now_ms - (amount * 7 * 86400 * 1000)
+    else:
+        print(f"{Colors.RED}Invalid lookback format. Use e.g., 24h, 7d, 2w{Colors.END}")
+        return
+
+    print(f"\n{Colors.BOLD}{coin} Candles ({interval}, last {lookback}){Colors.END}")
+    print("=" * 80)
+
+    try:
+        candles = info.candles_snapshot(coin, interval, start_ms, now_ms)
+
+        if not candles:
+            print(f"{Colors.DIM}No candle data{Colors.END}")
+            return
+
+        # Print table
+        print(f"  {'Time':<18} {'Open':>12} {'High':>12} {'Low':>12} {'Close':>12} {'Volume':>14}")
+        print("  " + "-" * 82)
+
+        closes = []
+        for c in candles:
+            t = datetime.fromtimestamp(c['t'] / 1000).strftime('%Y-%m-%d %H:%M')
+            o = float(c['o'])
+            h = float(c['h'])
+            l = float(c['l'])
+            cl = float(c['c'])
+            v = float(c['v'])
+            closes.append(cl)
+
+            # Color: green if close > open, red if close < open
+            color = Colors.GREEN if cl >= o else Colors.RED
+            print(f"  {t:<18} {color}{format_price(o):>12} {format_price(h):>12} {format_price(l):>12} {format_price(cl):>12}{Colors.END} {v:>14.2f}")
+
+        # Summary stats
+        if len(closes) >= 2:
+            print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+            first = closes[0]
+            last = closes[-1]
+            high = max(float(c['h']) for c in candles)
+            low = min(float(c['l']) for c in candles)
+            change = ((last - first) / first) * 100
+            change_color = Colors.GREEN if change >= 0 else Colors.RED
+
+            print(f"  Period change: {change_color}{change:+.2f}%{Colors.END} ({format_price(first)} -> {format_price(last)})")
+            print(f"  Period high:   {format_price(high)}")
+            print(f"  Period low:    {format_price(low)}")
+            print(f"  Candles:       {len(candles)}")
+
+            # Simple moving averages if enough data
+            if len(closes) >= 20:
+                sma20 = sum(closes[-20:]) / 20
+                print(f"  SMA(20):       {format_price(sma20)}")
+                pos = "above" if last > sma20 else "below"
+                print(f"  Price vs SMA:  {pos} ({((last - sma20) / sma20 * 100):+.2f}%)")
+
+            if len(closes) >= 50:
+                sma50 = sum(closes[-50:]) / 50
+                print(f"  SMA(50):       {format_price(sma50)}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching candles: {e}{Colors.END}")
 
 
 def cmd_scan(args):
@@ -1854,6 +1956,11 @@ def main():
     book_parser = subparsers.add_parser('book', help='Get order book')
     book_parser.add_argument('coin', help='Asset to get order book for')
 
+    candles_parser = subparsers.add_parser('candles', help='Get OHLCV candlestick data')
+    candles_parser.add_argument('coin', help='Asset to get candles for')
+    candles_parser.add_argument('--interval', default='1h', help='Candle interval: 1m, 5m, 15m, 1h, 4h, 1d (default: 1h)')
+    candles_parser.add_argument('--lookback', default='7d', help='Lookback period: e.g., 24h, 7d, 2w (default: 7d)')
+
     # Trading commands
     leverage_parser = subparsers.add_parser('leverage', help='Set leverage for an asset')
     leverage_parser.add_argument('coin', help='Asset to set leverage for')
@@ -1948,6 +2055,7 @@ def main():
         'price': cmd_price,
         'funding': cmd_funding,
         'book': cmd_book,
+        'candles': cmd_candles,
         'leverage': cmd_leverage,
         'buy': cmd_buy,
         'sell': cmd_sell,
