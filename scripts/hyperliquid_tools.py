@@ -26,8 +26,12 @@ from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (HL_ENV_FILE overrides default .env discovery)
+_env_file = os.getenv('HL_ENV_FILE')
+if _env_file:
+    load_dotenv(_env_file, override=True)
+else:
+    load_dotenv()
 
 # Hyperliquid SDK imports
 try:
@@ -254,6 +258,175 @@ def cmd_positions(args):
 
     except Exception as e:
         print(f"{Colors.RED}Error fetching positions: {e}{Colors.END}")
+
+
+def cmd_check(args):
+    """Position health check - shows book ratio, funding, price change for all open positions."""
+    import requests as req
+    info, config = setup_info(require_credentials=False, include_hip3=True)
+
+    address = args.address if hasattr(args, 'address') and args.address else config.get('account_address', '')
+    if not address:
+        print(f"{Colors.RED}Error: No account address. Set HL_ACCOUNT_ADDRESS or use --address.{Colors.END}")
+        return
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}POSITION HEALTH CHECK{Colors.END}")
+    if config['is_testnet']:
+        print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
+    print("=" * 90)
+
+    try:
+        # Get all positions (main + HIP-3 dexes)
+        user_state = info.user_state(address)
+        positions = user_state.get('assetPositions', [])
+
+        # Try to get HIP-3 positions from known dexes
+        for dex in ['xyz', 'vntl', 'flx', 'cash', 'km']:
+            try:
+                dex_state = info.user_state(address, dex=dex)
+                dex_positions = dex_state.get('assetPositions', [])
+                positions.extend(dex_positions)
+            except Exception:
+                pass
+
+        open_positions = [p for p in positions if float(p['position']['szi']) != 0]
+
+        if not open_positions:
+            print(f"\n{Colors.DIM}No open positions{Colors.END}")
+            return
+
+        account_value = float(user_state.get('marginSummary', {}).get('accountValue', 0))
+        withdrawable = float(user_state.get('withdrawable', 0))
+        print(f"\n  Account: {format_price(account_value)} | Withdrawable: {format_price(withdrawable)}")
+        print()
+
+        for pos in open_positions:
+            p = pos['position']
+            coin = p['coin']
+            size = float(p['szi'])
+            entry_px = float(p['entryPx'])
+            unrealized_pnl = float(p['unrealizedPnl'])
+            leverage = p.get('leverage', {})
+            liq_px = float(p.get('liquidationPx', 0)) if p.get('liquidationPx') else None
+
+            side = "LONG" if size > 0 else "SHORT"
+            side_color = Colors.GREEN if size > 0 else Colors.RED
+            notional = abs(size) * entry_px
+
+            # Get current price from book
+            mark_px = entry_px
+            book_ratio_str = "N/A"
+            bid_depth = 0
+            ask_depth = 0
+            warnings = []
+
+            try:
+                book_resp = req.post(
+                    config['api_url'] + "/info",
+                    json={"type": "l2Book", "coin": coin},
+                    timeout=10
+                )
+                if book_resp.status_code == 200:
+                    book = book_resp.json()
+                    levels = book.get('levels', [])
+                    if len(levels) >= 2 and levels[0] and levels[1]:
+                        best_bid = float(levels[0][0]['px'])
+                        best_ask = float(levels[1][0]['px'])
+                        mark_px = (best_bid + best_ask) / 2
+
+                        bid_depth = sum(float(b['sz']) * float(b['px']) for b in levels[0][:5])
+                        ask_depth = sum(float(a['sz']) * float(a['px']) for a in levels[1][:5])
+
+                        if ask_depth > 0 and bid_depth > 0:
+                            ratio = bid_depth / ask_depth
+                            if ratio >= 1:
+                                book_ratio_str = f"{ratio:.1f}:1 bid"
+                                book_color = Colors.GREEN
+                            else:
+                                inv_ratio = ask_depth / bid_depth
+                                book_ratio_str = f"{inv_ratio:.1f}:1 ask"
+                                book_color = Colors.RED
+
+                            # Warn if book is against position
+                            if side == "LONG" and ask_depth / bid_depth > 2.0:
+                                warnings.append("Book ask-heavy vs LONG")
+                            elif side == "SHORT" and bid_depth / ask_depth > 2.0:
+                                warnings.append("Book bid-heavy vs SHORT")
+                        else:
+                            book_color = Colors.YELLOW
+                            book_ratio_str = "thin"
+            except Exception:
+                book_color = Colors.YELLOW
+
+            # Get funding rate
+            funding_str = "N/A"
+            funding_apr = 0
+            try:
+                funding_resp = req.post(
+                    config['api_url'] + "/info",
+                    json={"type": "fundingHistory", "coin": coin, "startTime": 0},
+                    timeout=10
+                )
+                if funding_resp.status_code == 200:
+                    data = funding_resp.json()
+                    if data:
+                        latest = data[-1]
+                        funding = float(latest.get('fundingRate', 0))
+                        funding_apr = funding * 24 * 365 * 100
+                        funding_hr = funding * 100
+
+                        # Determine if we're collecting or paying
+                        if side == "LONG":
+                            collecting = funding < 0  # shorts pay longs
+                        else:
+                            collecting = funding > 0  # longs pay shorts
+
+                        if collecting:
+                            funding_str = f"{Colors.GREEN}{funding_apr:+.0f}% APR (collecting){Colors.END}"
+                        else:
+                            funding_str = f"{Colors.RED}{funding_apr:+.0f}% APR (paying){Colors.END}"
+                            if abs(funding_apr) > 100:
+                                warnings.append(f"High funding cost: {abs(funding_apr):.0f}% APR")
+            except Exception:
+                pass
+
+            # Price change from entry
+            if entry_px > 0:
+                if side == "LONG":
+                    pct_change = ((mark_px - entry_px) / entry_px) * 100
+                else:
+                    pct_change = ((entry_px - mark_px) / entry_px) * 100
+                pct_color = Colors.GREEN if pct_change >= 0 else Colors.RED
+                pct_str = f"{pct_color}{pct_change:+.1f}%{Colors.END}"
+            else:
+                pct_str = "N/A"
+
+            # Liquidation proximity warning
+            if liq_px and liq_px > 0:
+                if side == "LONG":
+                    liq_dist = ((mark_px - liq_px) / mark_px) * 100
+                else:
+                    liq_dist = ((liq_px - mark_px) / mark_px) * 100
+                if liq_dist < 10:
+                    warnings.append(f"Liq {liq_dist:.1f}% away @ {format_price(liq_px)}")
+
+            # Print position line
+            print(f"  {Colors.BOLD}{coin}{Colors.END} {side_color}{side}{Colors.END} | {format_price(mark_px)} ({pct_str} from entry) | PnL: {format_pnl(unrealized_pnl)}")
+            print(f"    Book: {book_color}{book_ratio_str}{Colors.END} (${bid_depth:,.0f} bid / ${ask_depth:,.0f} ask) | Funding: {funding_str}")
+
+            if leverage:
+                lev_type = leverage.get('type', 'unknown')
+                lev_val = leverage.get('value', 0)
+                print(f"    Leverage: {lev_val}x {lev_type} | Notional: {format_price(notional)} | Size: {abs(size):.4f}")
+
+            if warnings:
+                for w in warnings:
+                    print(f"    {Colors.YELLOW}⚠ {w}{Colors.END}")
+
+            print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error: {e}{Colors.END}")
 
 
 def cmd_price(args):
@@ -2234,6 +2407,8 @@ def main():
 
     # Status commands
     subparsers.add_parser('status', help='Account status and positions summary')
+    check_parser = subparsers.add_parser('check', help='Position health check (book ratio, funding, warnings)')
+    check_parser.add_argument('--address', help='Account address (overrides HL_ACCOUNT_ADDRESS)')
     subparsers.add_parser('positions', help='Detailed position information')
     subparsers.add_parser('orders', help='List open orders')
 
@@ -2359,6 +2534,7 @@ def main():
     # Route to command handlers
     commands = {
         'status': cmd_status,
+        'check': cmd_check,
         'positions': cmd_positions,
         'orders': cmd_orders,
         'price': cmd_price,

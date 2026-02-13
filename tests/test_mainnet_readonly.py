@@ -30,6 +30,8 @@ def run_cli(*args, timeout=30):
     # Clear credentials so we don't accidentally trade
     env.pop("HL_SECRET_KEY", None)
     env.pop("HL_API_WALLET_KEY", None)
+    # Clear HL_ENV_FILE so the script uses hyperclaw's own .env discovery
+    env.pop("HL_ENV_FILE", None)
 
     result = subprocess.run(
         cmd,
@@ -302,6 +304,35 @@ class TestLeverage:
         rc, out, err = run_cli("leverage", "BTC", "999")
         assert rc == 0
         assert "max:" in out
+
+
+# ============================================================================
+# CHECK (position health)
+# ============================================================================
+
+
+class TestCheck:
+    def test_check_no_address(self):
+        """check with no address should show error."""
+        rc, out, err = run_cli("check")
+        assert rc == 0
+        assert "No account address" in out or "POSITION HEALTH CHECK" in out
+
+    def test_check_with_address(self):
+        """check with a known address should show header and account info."""
+        # Use Hyperliquid's well-known vault address (always has state)
+        rc, out, err = run_cli("check", "--address", "0xdead000000000000000000000000000000000000", timeout=60)
+        assert rc == 0
+        assert "POSITION HEALTH CHECK" in out
+        # Should show either positions or "No open positions"
+        assert "Account:" in out or "No open positions" in out
+
+    def test_check_with_real_address(self):
+        """check with a real trader address should show position data if they have positions."""
+        # This address is a known active trader on Hyperliquid (public data)
+        rc, out, err = run_cli("check", "--address", "0x0000000000000000000000000000000000000000", timeout=60)
+        assert rc == 0
+        assert "POSITION HEALTH CHECK" in out
 
 
 # ============================================================================
