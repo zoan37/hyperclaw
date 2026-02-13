@@ -15,6 +15,13 @@
 - `SKILL.md` — agent-facing skill documentation
 - `tests/` — pytest test suite
 
+## Environment / .env Safety
+
+- **This repo's `.env` contains real trading credentials with real money.** Always use it when running commands or tests here.
+- **NEVER let an external `HL_ENV_FILE` leak in.** If you are working from another project (e.g. sandbox-2) that sets `HL_ENV_FILE`, make sure it does NOT propagate into hyperclaw commands or tests.
+- The test suite's `run_cli()` helper explicitly clears `HL_ENV_FILE` from the subprocess environment so tests always use hyperclaw's own `.env` discovery. Do not remove that safeguard.
+- When running tests manually, run them from the hyperclaw project root — not from another repo's directory — to avoid picking up the wrong `.env`.
+
 ## Running Commands
 
 - Always use the venv Python: `scripts/.venv/bin/python`
