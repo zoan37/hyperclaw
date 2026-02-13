@@ -1221,6 +1221,121 @@ def cmd_candles(args):
         print(f"{Colors.RED}Error fetching candles: {e}{Colors.END}")
 
 
+def cmd_funding_history(args):
+    """Show historical funding rates for a coin."""
+    info, config = setup_info()
+    coin = args.coin
+    lookback = getattr(args, 'lookback', '7d')
+
+    # Parse lookback to ms
+    now_ms = int(datetime.now().timestamp() * 1000)
+    unit = lookback[-1].lower()
+    amount = int(lookback[:-1])
+    if unit == 'h':
+        start_ms = now_ms - (amount * 3600 * 1000)
+    elif unit == 'd':
+        start_ms = now_ms - (amount * 86400 * 1000)
+    elif unit == 'w':
+        start_ms = now_ms - (amount * 7 * 86400 * 1000)
+    else:
+        start_ms = now_ms - (7 * 86400 * 1000)
+
+    try:
+        data = info.funding_history(coin, start_ms, now_ms)
+        if not data:
+            print(f"No funding history for {coin}")
+            return
+
+        print(f"\n{Colors.BOLD}{coin} Funding History (last {lookback}){Colors.END}")
+        print("=" * 70)
+        print(f"  {'Time':<22} {'Rate':>12} {'Annualized':>14} {'Premium':>12}")
+        print(f"  {'-'*22} {'-'*12} {'-'*14} {'-'*12}")
+
+        rates = []
+        for entry in data:
+            ts = datetime.fromtimestamp(entry['time'] / 1000).strftime('%Y-%m-%d %H:%M')
+            rate = float(entry['fundingRate'])
+            premium = float(entry['premium'])
+            annual = rate * 8760 * 100  # hourly rate * hours/year * 100 for %
+            rates.append(rate)
+
+            color = Colors.GREEN if rate >= 0 else Colors.RED
+            print(f"  {ts:<22} {color}{rate*100:>+11.6f}%{Colors.END} {color}{annual:>+13.2f}%{Colors.END} {premium*100:>+11.6f}%")
+
+        # Summary
+        avg_rate = sum(rates) / len(rates) if rates else 0
+        avg_annual = avg_rate * 8760 * 100
+        max_rate = max(rates) if rates else 0
+        min_rate = min(rates) if rates else 0
+        color = Colors.GREEN if avg_rate >= 0 else Colors.RED
+        print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+        print(f"  Samples:        {len(rates)}")
+        print(f"  Avg rate:       {color}{avg_rate*100:+.6f}% ({avg_annual:+.2f}% annualized){Colors.END}")
+        print(f"  Max rate:       {max_rate*100:+.6f}%")
+        print(f"  Min rate:       {min_rate*100:+.6f}%")
+        print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching funding history: {e}{Colors.END}")
+
+
+def cmd_trades(args):
+    """Show recent trades for a coin."""
+    info, config = setup_info()
+    coin = args.coin
+    limit = getattr(args, 'limit', 20)
+
+    try:
+        # SDK doesn't wrap recentTrades, use raw post
+        data = info.post("/info", {"type": "recentTrades", "coin": coin})
+        if not data:
+            print(f"No recent trades for {coin}")
+            return
+
+        # Take last N trades
+        trades = data[-limit:] if len(data) > limit else data
+
+        print(f"\n{Colors.BOLD}{coin} Recent Trades (last {len(trades)}){Colors.END}")
+        print("=" * 75)
+        print(f"  {'Time':<22} {'Side':<6} {'Price':>14} {'Size':>12} {'Value':>14}")
+        print(f"  {'-'*22} {'-'*6} {'-'*14} {'-'*12} {'-'*14}")
+
+        total_buy_vol = 0
+        total_sell_vol = 0
+        for t in trades:
+            ts = datetime.fromtimestamp(t['time'] / 1000).strftime('%Y-%m-%d %H:%M:%S')
+            side = t['side']
+            px = float(t['px'])
+            sz = float(t['sz'])
+            value = px * sz
+
+            if side == 'B':
+                color = Colors.GREEN
+                side_label = "BUY"
+                total_buy_vol += value
+            else:
+                color = Colors.RED
+                side_label = "SELL"
+                total_sell_vol += value
+
+            print(f"  {ts:<22} {color}{side_label:<6}{Colors.END} ${px:>13,.2f} {sz:>12} ${value:>13,.2f}")
+
+        # Summary
+        total_vol = total_buy_vol + total_sell_vol
+        buy_pct = (total_buy_vol / total_vol * 100) if total_vol > 0 else 50
+        print(f"\n{Colors.BOLD}Summary:{Colors.END}")
+        print(f"  Buy volume:     ${total_buy_vol:>14,.2f} ({buy_pct:.1f}%)")
+        print(f"  Sell volume:    ${total_sell_vol:>14,.2f} ({100-buy_pct:.1f}%)")
+        print(f"  Total volume:   ${total_vol:>14,.2f}")
+        bias_color = Colors.GREEN if buy_pct > 50 else Colors.RED if buy_pct < 50 else Colors.END
+        bias = "BUY BIAS" if buy_pct > 55 else "SELL BIAS" if buy_pct < 45 else "NEUTRAL"
+        print(f"  Bias:           {bias_color}{bias}{Colors.END}")
+        print()
+
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching recent trades: {e}{Colors.END}")
+
+
 def cmd_scan(args):
     """Scan all assets for trading opportunities based on funding rates."""
     info, config = setup_info()
@@ -1961,6 +2076,14 @@ def main():
     candles_parser.add_argument('--interval', default='1h', help='Candle interval: 1m, 5m, 15m, 1h, 4h, 1d (default: 1h)')
     candles_parser.add_argument('--lookback', default='7d', help='Lookback period: e.g., 24h, 7d, 2w (default: 7d)')
 
+    fh_parser = subparsers.add_parser('funding-history', help='Historical funding rates for a coin')
+    fh_parser.add_argument('coin', help='Asset to get funding history for')
+    fh_parser.add_argument('--lookback', default='7d', help='Lookback period: e.g., 24h, 7d, 2w (default: 7d)')
+
+    trades_parser = subparsers.add_parser('trades', help='Recent trades for a coin')
+    trades_parser.add_argument('coin', help='Asset to get recent trades for')
+    trades_parser.add_argument('--limit', type=int, default=20, help='Number of trades to show (default: 20)')
+
     # Trading commands
     leverage_parser = subparsers.add_parser('leverage', help='Set leverage for an asset')
     leverage_parser.add_argument('coin', help='Asset to set leverage for')
@@ -2056,6 +2179,8 @@ def main():
         'funding': cmd_funding,
         'book': cmd_book,
         'candles': cmd_candles,
+        'funding-history': cmd_funding_history,
+        'trades': cmd_trades,
         'leverage': cmd_leverage,
         'buy': cmd_buy,
         'sell': cmd_sell,

@@ -67,6 +67,8 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | `funding [COINS...]` | Funding rates (hourly + APR + signal) | `hyperliquid_tools.py funding BTC SOL DOGE` |
 | `book COIN` | L2 order book with spread | `hyperliquid_tools.py book SOL` |
 | `candles COIN` | OHLCV candlestick data with SMA | `hyperliquid_tools.py candles BTC --interval 1h --lookback 7d` |
+| `funding-history COIN` | Historical funding rates with summary | `hyperliquid_tools.py funding-history BTC --lookback 24h` |
+| `trades COIN` | Recent trade tape with buy/sell bias | `hyperliquid_tools.py trades BTC --limit 20` |
 | `raw COIN` | Raw JSON data dump for processing | `hyperliquid_tools.py raw BTC` |
 
 ### Analysis

@@ -182,6 +182,46 @@ class TestCandles:
 
 
 # ============================================================================
+# FUNDING HISTORY
+# ============================================================================
+
+
+class TestFundingHistory:
+    def test_funding_history_btc(self):
+        """funding-history should show historical rates."""
+        rc, out, err = run_cli("funding-history", "BTC", "--lookback", "24h")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Funding History" in out
+        assert "Annualized" in out
+        assert "Summary" in out
+
+    def test_funding_history_default(self):
+        rc, out, err = run_cli("funding-history", "ETH")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Funding History" in out
+
+
+# ============================================================================
+# RECENT TRADES
+# ============================================================================
+
+
+class TestTrades:
+    def test_trades_btc(self):
+        """trades should show recent trade tape."""
+        rc, out, err = run_cli("trades", "BTC")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Recent Trades" in out
+        assert "BUY" in out or "SELL" in out
+
+    def test_trades_with_limit(self):
+        rc, out, err = run_cli("trades", "ETH", "--limit", "5")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Recent Trades" in out
+        assert "Summary" in out
+
+
+# ============================================================================
 # HIP-3 / DEXES
 # ============================================================================
 
