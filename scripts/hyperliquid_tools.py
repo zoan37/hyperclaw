@@ -22,6 +22,7 @@ Usage:
 import os
 import sys
 import json
+import time
 import argparse
 from datetime import datetime
 from typing import Optional
@@ -160,9 +161,25 @@ def get_account_summary(info, address: str) -> dict:
         spot_balances     - list of {coin, total, hold} dicts (may be empty)
         perp_state        - raw user_state dict (for position access)
     """
-    # Always fetch perp state
-    perp_state = info.user_state(address)
-    margin_summary = perp_state.get('marginSummary', {})
+    # Always fetch perp state (retry up to 3 times to avoid false $0 reports)
+    perp_state = None
+    last_error = None
+    for attempt in range(3):
+        try:
+            result = info.user_state(address)
+            if isinstance(result, dict) and 'marginSummary' in result:
+                perp_state = result
+                break
+            last_error = "Malformed API response (missing marginSummary)"
+        except Exception as e:
+            last_error = str(e)
+        if attempt < 2:
+            time.sleep(2)
+
+    if perp_state is None:
+        raise RuntimeError(f"Failed to fetch account state after 3 attempts: {last_error}")
+
+    margin_summary = perp_state['marginSummary']
     account_value = float(margin_summary.get('accountValue', 0))
     margin_used = float(margin_summary.get('totalMarginUsed', 0))
     withdrawable = float(perp_state.get('withdrawable', 0))
