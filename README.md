@@ -2,7 +2,7 @@
 
 An [AgentSkills](https://agentskills.io)-compatible skill for trading perpetual futures on [Hyperliquid](https://hyperliquid.xyz). Works with Claude Code, OpenClaw, and any agent that supports the AgentSkills standard.
 
-Supports 228+ native crypto perps, HIP-3 builder-deployed perps (equities like TSLA, commodities like GOLD), and market intelligence tools.
+Supports 229+ native crypto perps, HIP-3 builder-deployed perps (equities like TSLA, commodities like GOLD), market intelligence, and a caching proxy to prevent rate limiting.
 
 ## Quick Start
 
@@ -17,7 +17,10 @@ bash hyperclaw/scripts/setup.sh
 cp hyperclaw/.env.example hyperclaw/.env
 # Edit .env with your Hyperliquid API key
 
-# 4. Test
+# 4. Start the caching proxy (recommended)
+hyperclaw/scripts/.venv/bin/python hyperclaw/scripts/server.py &
+
+# 5. Test
 hyperclaw/scripts/.venv/bin/python hyperclaw/scripts/hyperliquid_tools.py price BTC
 ```
 
@@ -27,12 +30,23 @@ See [SKILL.md](SKILL.md) for the full command reference and usage instructions t
 
 ## Commands
 
-- **Account:** `status`, `positions`, `orders`
-- **Market Data:** `price`, `funding`, `book`, `raw`
+- **Account:** `status`, `positions`, `orders`, `check`, `portfolio`, `user-funding`
+- **Market Data:** `price`, `funding`, `book`, `candles`, `funding-history`, `trades`, `raw`
 - **Analysis:** `analyze`, `scan`, `hip3`, `dexes`, `history`
-- **Trading:** `buy`, `sell`, `limit-buy`, `limit-sell`, `stop-loss`, `take-profit`, `close`, `cancel`, `cancel-all`
+- **Trading:** `leverage`, `buy`, `sell`, `limit-buy`, `limit-sell`, `stop-loss`, `take-profit`, `close`, `cancel`, `cancel-all`, `modify-order`
 - **Intelligence (requires Grok API):** `sentiment`, `unlocks`, `devcheck`
 - **Prediction Markets:** `polymarket`
+
+## Features
+
+- **229+ perps** — all native Hyperliquid perpetual futures
+- **HIP-3 multi-dex** — equities (TSLA, META, NVDA), commodities (GOLD, SILVER), forex, and more across 7+ builder dexes
+- **Caching proxy** — reduces API weight usage, prevents rate limiting for agents making many calls
+- **Account modes** — auto-detects unified, portfolio margin, and standard accounts
+- **Order types** — market, limit, stop-loss, take-profit, modify
+- **Position health** — `check` command shows book ratio, funding, liquidation proximity warnings
+- **Market intelligence** — Grok-powered sentiment analysis, token unlock tracking, developer exodus signals
+- **Prediction markets** — Polymarket odds for macro context
 
 ## License
 
