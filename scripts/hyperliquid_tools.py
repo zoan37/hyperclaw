@@ -240,18 +240,18 @@ def get_account_summary(info, address: str) -> dict:
                         'hold': hold,
                     })
 
-            # In unified mode, spot and perp are separate pools.
-            # Total portfolio = perp accountValue + spot balances.
-            # (Confirmed by the portfolio endpoint which reports both summed.)
-            # TODO: This assumes spot balances are USDC (1 unit = $1). If spot
-            # trading is added (BTC, HYPE, ETH, etc.), each balance must be
-            # converted to USD via mid price: spot_value = sum(total * price).
-            # Without this, non-stablecoin spot holdings will be massively
-            # understated (e.g. 0.5 BTC counted as $0.50 instead of ~$34k).
-            spot_value = sum(b['total'] for b in spot_balances)
-            portfolio_value = account_value + spot_value
-            withdrawable = float(perp_state.get('withdrawable', 0)) + \
-                sum(b['total'] - b['hold'] for b in spot_balances)
+            # In unified mode, spot USDC "hold" is the USDC locked as perp
+            # margin.  perp accountValue is derived FROM that held USDC +
+            # unrealized PnL.  Using spot total would double-count the held
+            # portion, so we use free (total - hold) for spot and add it to
+            # perp accountValue.
+            #
+            # TODO: This assumes spot balances are stablecoins (1 unit ≈ $1).
+            # If spot trading of non-stablecoins is added (BTC, HYPE, etc.),
+            # each balance must be converted to USD via mid price.
+            spot_free = sum(b['total'] - b['hold'] for b in spot_balances)
+            portfolio_value = account_value + spot_free
+            withdrawable = float(perp_state.get('withdrawable', 0)) + spot_free
         except Exception:
             # Fallback: use perp values if spot query fails
             portfolio_value = account_value
