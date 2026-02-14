@@ -142,6 +142,113 @@ def format_pnl(pnl: float) -> str:
         return f"{Colors.RED}-${abs(pnl):,.2f}{Colors.END}"
 
 
+def get_account_summary(info, address: str) -> dict:
+    """Detect account abstraction mode and compute true portfolio value.
+
+    For unified/portfolio-margin accounts, the perp clearinghouse's accountValue
+    only reflects margin locked in perp positions.  The real balance lives in the
+    spot clearinghouse (USDC).  This helper merges both views so callers always
+    get the correct portfolio value.
+
+    Returns dict with keys:
+        mode              - 'unified', 'portfolio_margin', or 'standard'
+        mode_label        - display string like '[unified]'
+        portfolio_value   - true portfolio value (float)
+        account_value     - raw perp accountValue (float)
+        margin_used       - total margin used in perps (float)
+        withdrawable      - withdrawable amount (float)
+        spot_balances     - list of {coin, total, hold} dicts (may be empty)
+        perp_state        - raw user_state dict (for position access)
+    """
+    # Always fetch perp state
+    perp_state = info.user_state(address)
+    margin_summary = perp_state.get('marginSummary', {})
+    account_value = float(margin_summary.get('accountValue', 0))
+    margin_used = float(margin_summary.get('totalMarginUsed', 0))
+    withdrawable = float(perp_state.get('withdrawable', 0))
+
+    # Detect abstraction mode
+    mode = 'standard'
+    try:
+        abstraction = info.query_user_abstraction_state(address)
+        # API may return a plain string or a dict with a 'mode' key
+        if isinstance(abstraction, str):
+            ab_mode = abstraction
+        elif isinstance(abstraction, dict):
+            ab_mode = abstraction.get('mode', '')
+        else:
+            ab_mode = ''
+        if ab_mode in ('unifiedAccount', 'dexAbstraction'):
+            mode = 'unified'
+        elif ab_mode == 'portfolioMargin':
+            mode = 'portfolio_margin'
+    except Exception:
+        pass
+
+    spot_balances = []
+    portfolio_value = account_value
+
+    if mode != 'standard':
+        # Fetch spot state for the true USDC balance
+        try:
+            spot_state = info.spot_user_state(address)
+            raw_balances = spot_state.get('balances', [])
+            for b in raw_balances:
+                total = float(b.get('total', 0))
+                hold = float(b.get('hold', 0))
+                if total > 0.001 or hold > 0.001:
+                    spot_balances.append({
+                        'coin': b.get('coin', '?'),
+                        'total': total,
+                        'hold': hold,
+                    })
+
+            # Compute true portfolio value:
+            #   spot USDC total + unrealized perp PnL
+            usdc_total = 0
+            for b in raw_balances:
+                if b.get('coin', '').upper() == 'USDC':
+                    usdc_total = float(b.get('total', 0))
+                    break
+
+            # Sum unrealized PnL across all perp positions
+            total_unrealized = 0
+            for pos in perp_state.get('assetPositions', []):
+                szi = float(pos['position'].get('szi', 0))
+                if szi != 0:
+                    total_unrealized += float(pos['position'].get('unrealizedPnl', 0))
+
+            portfolio_value = usdc_total + total_unrealized
+
+            # Withdrawable for unified = spot USDC available (total - hold)
+            usdc_hold = 0
+            for b in raw_balances:
+                if b.get('coin', '').upper() == 'USDC':
+                    usdc_hold = float(b.get('hold', 0))
+                    break
+            withdrawable = usdc_total - usdc_hold
+        except Exception:
+            # Fallback: use perp values if spot query fails
+            portfolio_value = account_value
+
+    mode_labels = {
+        'unified': f'{Colors.MAGENTA}[unified]{Colors.END}',
+        'portfolio_margin': f'{Colors.MAGENTA}[portfolio margin]{Colors.END}',
+        'standard': f'{Colors.DIM}[standard]{Colors.END}',
+    }
+
+    return {
+        'mode': mode,
+        'mode_label': mode_labels[mode],
+        'portfolio_value': portfolio_value,
+        'account_value': account_value,
+        'margin_used': margin_used,
+        'withdrawable': withdrawable,
+        'spot_balances': spot_balances,
+        'perp_state': perp_state,
+    }
+
+
 # ============================================================================
 # READ-ONLY COMMANDS
 # ============================================================================
@@ -156,23 +263,25 @@ def cmd_status(args):
     print("=" * 60)
 
     try:
-        # Get main perps state
-        user_state = info.user_state(config['account_address'])
+        summary = get_account_summary(info, config['account_address'])
+        user_state = summary['perp_state']
 
         # Also get xyz (HIP-3) state
         xyz_state = info.user_state(config['account_address'], dex='xyz')
 
-        # Account balances
-        margin_summary = user_state.get('marginSummary', {})
-        account_value = float(margin_summary.get('accountValue', 0))
-        total_margin = float(margin_summary.get('totalMarginUsed', 0))
-        total_pnl = float(margin_summary.get('totalRawUsd', 0))
-        withdrawable = float(user_state.get('withdrawable', 0))
+        print(f"\n{Colors.BOLD}Account Summary:{Colors.END} {summary['mode_label']}")
+        print(f"  Portfolio Value: {format_price(summary['portfolio_value'])}")
+        if summary['mode'] != 'standard':
+            print(f"  Perp Margin:     {format_price(summary['account_value'])}")
+        print(f"  Margin Used:     {format_price(summary['margin_used'])}")
+        print(f"  Withdrawable:    {format_price(summary['withdrawable'])}")
 
-        print(f"\n{Colors.BOLD}Account Summary:{Colors.END}")
-        print(f"  Account Value:  {format_price(account_value)}")
-        print(f"  Margin Used:    {format_price(total_margin)}")
-        print(f"  Withdrawable:   {format_price(withdrawable)}")
+        # Spot balances for unified/portfolio margin
+        if summary['spot_balances']:
+            print(f"\n{Colors.BOLD}Spot Balances:{Colors.END}")
+            for bal in summary['spot_balances']:
+                hold_str = f" (hold: ${bal['hold']:,.2f})" if bal['hold'] > 0.01 else ""
+                print(f"  {bal['coin']:<8} ${bal['total']:,.2f}{hold_str}")
 
         # Positions (combine main + xyz HIP-3)
         positions = user_state.get('assetPositions', [])
@@ -276,8 +385,9 @@ def cmd_check(args):
     print("=" * 90)
 
     try:
-        # Get all positions (main + HIP-3 dexes)
-        user_state = info.user_state(address)
+        # Get account summary with mode detection
+        summary = get_account_summary(info, address)
+        user_state = summary['perp_state']
         positions = user_state.get('assetPositions', [])
 
         # Try to get HIP-3 positions from known dexes
@@ -295,9 +405,7 @@ def cmd_check(args):
             print(f"\n{Colors.DIM}No open positions{Colors.END}")
             return
 
-        account_value = float(user_state.get('marginSummary', {}).get('accountValue', 0))
-        withdrawable = float(user_state.get('withdrawable', 0))
-        print(f"\n  Account: {format_price(account_value)} | Withdrawable: {format_price(withdrawable)}")
+        print(f"\n  Portfolio Value: {format_price(summary['portfolio_value'])} {summary['mode_label']} | Withdrawable: {format_price(summary['withdrawable'])}")
         print()
 
         for pos in open_positions:
@@ -1182,12 +1290,12 @@ def cmd_analyze(args):
         # 1. Account State (if credentials configured)
         print(f"\n{Colors.BOLD}=== ACCOUNT STATE ==={Colors.END}")
         if config['account_address']:
-            user_state = info.user_state(config['account_address'])
-            margin_summary = user_state.get('marginSummary', {})
+            summary = get_account_summary(info, config['account_address'])
+            user_state = summary['perp_state']
 
-            print(f"Account Value: ${float(margin_summary.get('accountValue', 0)):,.2f}")
-            print(f"Total Margin Used: ${float(margin_summary.get('totalMarginUsed', 0)):,.2f}")
-            print(f"Withdrawable: ${float(user_state.get('withdrawable', 0)):,.2f}")
+            print(f"Portfolio Value: ${summary['portfolio_value']:,.2f} {summary['mode_label']}")
+            print(f"Total Margin Used: ${summary['margin_used']:,.2f}")
+            print(f"Withdrawable: ${summary['withdrawable']:,.2f}")
 
             positions = user_state.get('assetPositions', [])
             open_positions = [p for p in positions if float(p['position']['szi']) != 0]

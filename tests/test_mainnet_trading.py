@@ -118,11 +118,12 @@ def cleanup_positions():
 
 class TestAccountReads:
     def test_status(self):
-        """status should show account summary."""
+        """status should show account summary with portfolio value."""
         rc, out, err = run_cli("status")
         assert rc == 0, f"failed: {err or out}"
         assert "ACCOUNT STATUS" in out
         assert "Account Summary" in out
+        assert "Portfolio Value" in out
 
     def test_positions(self):
         """positions should show position details or 'No open positions'."""

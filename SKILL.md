@@ -55,7 +55,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `status` | Account balance, positions, PnL (includes HIP-3) | `hyperliquid_tools.py status` |
+| `status` | Account balance, account mode, positions, PnL (handles unified/portfolio margin accounts) | `hyperliquid_tools.py status` |
 | `positions` | Detailed position info (leverage, liquidation) | `hyperliquid_tools.py positions` |
 | `orders` | Open orders | `hyperliquid_tools.py orders` |
 | `user-funding` | Your funding payments received/paid | `hyperliquid_tools.py user-funding --lookback 7d` |
@@ -178,7 +178,7 @@ The proxy caches `/info` read responses (metadata 300s, prices 5s, user state 2s
 | `HL_ACCOUNT_ADDRESS` | For trading/status | Hyperliquid wallet address |
 | `HL_SECRET_KEY` | For trading | API wallet private key |
 | `HL_TESTNET` | No | `true` for testnet (default), `false` for mainnet |
-| `HL_PROXY_URL` | Recommended | Caching proxy URL (default: `http://localhost:18731`) |
+| `HL_PROXY_URL` | Recommended | Caching proxy URL (default: `http://localhost:18731`). `status` auto-detects account abstraction mode (unified/portfolio margin) and shows the true portfolio value |
 | `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck |
 
 **Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`, `raw`, `polymarket`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY`.

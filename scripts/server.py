@@ -43,6 +43,8 @@ TTL_CONFIG: dict[str, int] = {
     "meta": 300,
     "spotMeta": 300,
     "perpDexs": 300,
+    "userAbstraction": 300,
+    "userDexAbstraction": 300,
     # Prices — need freshness
     "allMids": 5,
     "l2Book": 3,
