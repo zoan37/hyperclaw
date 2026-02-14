@@ -968,14 +968,14 @@ def cmd_transfer(args):
 
     if token_name:
         # User specified the token directly
-        for idx, (name, pair) in _COLLATERAL_SPOT_PAIRS.items():
+        for idx, (name, pair, _slippage) in _COLLATERAL_SPOT_PAIRS.items():
             if name.upper() == token_name.upper():
                 spot_pair = pair
                 token_name = name
                 break
         if not spot_pair:
             print(f"{Colors.RED}Unknown collateral token: {token_name}")
-            print(f"Known tokens: {', '.join(name for name, _ in _COLLATERAL_SPOT_PAIRS.values())}{Colors.END}")
+            print(f"Known tokens: {', '.join(name for name, _p, _s in _COLLATERAL_SPOT_PAIRS.values())}{Colors.END}")
             return
     else:
         # Default to USDH (most common: km, flx, vntl)
@@ -999,13 +999,13 @@ def cmd_transfer(args):
                 hold_str = f" (hold: {hold:.2f})" if hold > 0.01 else ""
                 print(f"  {coin:<8} {total:.2f}{hold_str}")
 
-        # Execute spot swap
-        # Buy collateral: is_buy=True, size=amount in collateral, price=1.002 (slight premium)
-        # Sell collateral: is_buy=False, size=amount in collateral, price=0.998 (slight discount)
+        # Execute spot swap (IOC = fill at best available price, limit just sets ceiling/floor)
+        # Slippage is per-token: tight for liquid strict-list tokens, wider for thin books.
+        slippage = _get_swap_slippage(token_name)
         if is_sell:
-            result = exchange.order(spot_pair, False, float(amount), 0.998, {'limit': {'tif': 'Ioc'}})
+            result = exchange.order(spot_pair, False, float(amount), 1.0 - slippage, {'limit': {'tif': 'Ioc'}})
         else:
-            result = exchange.order(spot_pair, True, float(amount), 1.002, {'limit': {'tif': 'Ioc'}})
+            result = exchange.order(spot_pair, True, float(amount), 1.0 + slippage, {'limit': {'tif': 'Ioc'}})
 
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
@@ -1034,13 +1034,16 @@ def cmd_transfer(args):
         print(f"{Colors.RED}Error: {e}{Colors.END}")
 
 
-# Map of HIP-3 dex collateral token index → (token name, USDC spot pair coin)
+# Map of HIP-3 dex collateral token index → (token name, USDC spot pair coin, slippage)
 # Built from perp_dex meta collateralToken field + spot pair lookup.
 # Token 0 = USDC (no swap needed).
+# Slippage: max distance from $1.00 for IOC fill. Tight for liquid strict-list tokens,
+# wider for thin books. IOC always fills at best available — this is just a guard rail.
 _COLLATERAL_SPOT_PAIRS = {
-    360: ('USDH', '@230'),   # km, flx, vntl
-    235: ('USDe', '@150'),   # hyna
-    268: ('USDT0', '@166'),  # cash
+    360: ('USDH', '@230', 0.002),    # km, flx, vntl — strict list, tight spreads
+    235: ('USDe', '@150', 0.002),    # hyna — strict list, tight spreads
+    268: ('USDT0', '@166', 0.002),   # cash — strict list, tight spreads
+    239: ('USDXL', '@152', 0.02),    # Last USD — not on strict list, wider spreads
 }
 
 
@@ -1060,6 +1063,14 @@ def _get_dex_collateral(info, dex_name):
         return (token_idx, f'token#{token_idx}', None)
     except Exception:
         return (0, 'USDC', None)
+
+
+def _get_swap_slippage(token_name):
+    """Get the IOC slippage limit for a collateral token swap."""
+    for _idx, (name, _pair, slippage) in _COLLATERAL_SPOT_PAIRS.items():
+        if name.upper() == token_name.upper():
+            return slippage
+    return 0.002  # default: tight
 
 
 
@@ -2963,9 +2974,9 @@ def main():
     leverage_parser.add_argument('leverage', type=int, help='Leverage multiplier (e.g., 5 for 5x)')
     leverage_parser.add_argument('--isolated', action='store_true', help='Use isolated margin (default: cross)')
 
-    swap_parser = subparsers.add_parser('swap', help='Swap USDC to HIP-3 dex collateral (USDH, USDe, USDT0)')
+    swap_parser = subparsers.add_parser('swap', help='Swap USDC to HIP-3 dex collateral (USDH, USDe, USDT0, USDXL)')
     swap_parser.add_argument('amount', type=float, help='Amount to swap')
-    swap_parser.add_argument('--token', default=None, help='Collateral token (default: USDH). Options: USDH, USDe, USDT0')
+    swap_parser.add_argument('--token', default=None, help='Collateral token (default: USDH). Options: USDH, USDe, USDT0, USDXL')
     swap_parser.add_argument('--to-usdc', action='store_true', help='Reverse: sell collateral back to USDC')
 
     buy_parser = subparsers.add_parser('buy', help='Market buy')

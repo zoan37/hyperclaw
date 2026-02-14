@@ -61,7 +61,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | `check` | Position health check (book ratio, funding, PnL, leverage, liquidation warnings) | `hyperliquid_tools.py check` or `check --address 0x...` |
 | `user-funding` | Your funding payments received/paid | `hyperliquid_tools.py user-funding --lookback 7d` |
 | `portfolio` | Portfolio performance (PnL, volume by period) | `hyperliquid_tools.py portfolio` or `portfolio --address 0x...` |
-| `swap` | Swap USDC ↔ HIP-3 dex collateral (USDH, USDe, USDT0) | `hyperliquid_tools.py swap 20` or `swap 20 --token USDe` or `swap 10 --to-usdc` |
+| `swap` | Swap USDC ↔ HIP-3 dex collateral (USDH, USDe, USDT0, USDXL) | `hyperliquid_tools.py swap 20` or `swap 20 --token USDe` or `swap 10 --to-usdc` |
 
 ### Market Data
 
@@ -152,6 +152,9 @@ hyperliquid_tools.py funding xyz:TSLA vntl:SPACEX km:US500
 | USDH | `swap <amount>` (default) |
 | USDe | `swap <amount> --token USDe` |
 | USDT0 | `swap <amount> --token USDT0` |
+| USDXL | `swap <amount> --token USDXL` |
+
+**Note on USDXL:** USDXL (Last USD) is not on Hyperliquid's strict list and has lower liquidity than other collateral tokens. Expect wider spreads when swapping. No HIP-3 dex currently uses USDXL as collateral, but the swap is available if needed.
 
 To swap collateral back to USDC: `swap <amount> --to-usdc` (or `swap <amount> --token USDe --to-usdc`).
 
