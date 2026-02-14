@@ -86,7 +86,7 @@ def cleanup_positions():
     except Exception:
         pass
     time.sleep(2)
-    for coin in ["km:US500"]:
+    for coin in ["km:US500", "hyna:BTC", "cash:GOLD"]:
         try:
             run_cli("close", coin, timeout=30)
             time.sleep(2)
@@ -181,6 +181,86 @@ class TestHip3CollateralTrading:
         rc, out, err = run_cli("swap", "11", "--to-usdc")
         assert rc == 0, f"failed: {err or out}"
         assert "Swapped" in out or "USDH" in out
+
+
+# ============================================================================
+# USDe COLLATERAL (hyna dex)
+# ============================================================================
+
+
+class TestHynaUSDe:
+    """Full flow: swap USDC → USDe, trade hyna:BTC, close, swap back."""
+
+    def test_01_swap_usdc_to_usde(self):
+        """Swap USDC → USDe for hyna dex trading."""
+        rc, out, err = run_cli("swap", "11", "--token", "USDe")
+        assert rc == 0, f"failed: {err or out}"
+        assert "USDe" in out
+        assert "Swapped" in out
+
+    def test_02_set_leverage(self):
+        """Set leverage on hyna:BTC (isolated required for HIP-3)."""
+        rc, out, err = run_cli("leverage", "hyna:BTC", "3", "--isolated")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Leverage updated!" in out
+
+    def test_03_buy_hyna_btc(self):
+        """Buy hyna:BTC — requires USDe collateral."""
+        rc, out, err = run_cli("buy", "hyna:BTC", "0.0002")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order filled!" in out
+
+    def test_04_close_hyna_btc(self):
+        """Close the hyna:BTC position."""
+        rc, out, err = run_cli("close", "hyna:BTC")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Position closed!" in out
+
+    def test_05_swap_usde_back(self):
+        """Swap USDe back to USDC."""
+        rc, out, err = run_cli("swap", "11", "--token", "USDe", "--to-usdc")
+        assert rc == 0, f"failed: {err or out}"
+        assert "USDe" in out
+
+
+# ============================================================================
+# USDT0 COLLATERAL (cash dex)
+# ============================================================================
+
+
+class TestCashUSDT0:
+    """Full flow: swap USDC → USDT0, trade cash:GOLD, close, swap back."""
+
+    def test_01_swap_usdc_to_usdt0(self):
+        """Swap USDC → USDT0 for cash dex trading."""
+        rc, out, err = run_cli("swap", "11", "--token", "USDT0")
+        assert rc == 0, f"failed: {err or out}"
+        assert "USDT0" in out
+        assert "Swapped" in out
+
+    def test_02_set_leverage(self):
+        """Set leverage on cash:GOLD (isolated required for HIP-3)."""
+        rc, out, err = run_cli("leverage", "cash:GOLD", "10", "--isolated")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Leverage updated!" in out
+
+    def test_03_buy_cash_gold(self):
+        """Buy cash:GOLD — requires USDT0 collateral."""
+        rc, out, err = run_cli("buy", "cash:GOLD", "0.01")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order filled!" in out
+
+    def test_04_close_cash_gold(self):
+        """Close the cash:GOLD position."""
+        rc, out, err = run_cli("close", "cash:GOLD")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Position closed!" in out
+
+    def test_05_swap_usdt0_back(self):
+        """Swap USDT0 back to USDC."""
+        rc, out, err = run_cli("swap", "11", "--token", "USDT0", "--to-usdc")
+        assert rc == 0, f"failed: {err or out}"
+        assert "USDT0" in out
 
 
 # ============================================================================
