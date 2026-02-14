@@ -237,6 +237,12 @@ def get_account_summary(info, address: str) -> dict:
     }
 
 
+# Rate limiting note: Hyperliquid's REST API allows 1,200 weight/minute per IP.
+# user_state (clearinghouseState) costs weight 2, so 8 dex calls = 16 weight (~1.3% of budget).
+# frontend_open_orders costs weight 20, so 8 calls = 160 weight (~13% of budget).
+# No delay needed between calls. The proxy cache further reduces upstream hits.
+# Ref: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/rate-limits-and-user-limits
+
 def _get_all_positions(info, address):
     """Fetch positions from native perps + all HIP-3 dexes."""
     positions = []
