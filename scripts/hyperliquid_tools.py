@@ -2166,7 +2166,7 @@ def _cmd_scan_sorted(assets, hip3_data, sort_key, reverse, top_n, min_volume):
     sort_cfg = {
         'funding':      (lambda x: x['funding_apr'], False),   # ascending (most negative first)
         'volume':       (lambda x: x['volume'], True),          # descending
-        'oi':           (lambda x: x['oi'], True),              # descending
+        'oi':           (lambda x: x.get('oi_ntl', 0), True),    # descending (notional)
         'price-change': (lambda x: x['pct_change'], True),     # descending
     }
     key_fn, default_desc = sort_cfg[sort_key]
@@ -2184,7 +2184,7 @@ def _cmd_scan_sorted(assets, hip3_data, sort_key, reverse, top_n, min_volume):
     for a in rows:
         funding_color = Colors.GREEN if a['funding_apr'] < -10 else Colors.RED if a['funding_apr'] > 10 else Colors.YELLOW
         chg_color = Colors.GREEN if a['pct_change'] > 0 else Colors.RED if a['pct_change'] < 0 else Colors.END
-        print(f"{a['name']:<14} ${a['price']:>10,.2f} {funding_color}{a['funding_apr']:>11.1f}%{Colors.END} ${a.get('oi', 0):>12,.0f} ${a.get('volume', 0):>12,.0f} {chg_color}{a['pct_change']:>+8.2f}%{Colors.END}")
+        print(f"{a['name']:<14} ${a['price']:>10,.2f} {funding_color}{a['funding_apr']:>11.1f}%{Colors.END} ${a.get('oi_ntl', 0):>12,.0f} ${a.get('volume', 0):>12,.0f} {chg_color}{a['pct_change']:>+8.2f}%{Colors.END}")
 
 
 def cmd_scan(args):
@@ -2222,6 +2222,7 @@ def cmd_scan(args):
                     'funding_hr': funding * 100,
                     'funding_apr': funding * 24 * 365 * 100,
                     'oi': oi,
+                    'oi_ntl': oi * mark_px,
                     'volume': volume,
                     'pct_change': pct_change,
                 })
@@ -2271,6 +2272,7 @@ def cmd_scan(args):
                         'funding_hr': funding_hr,
                         'funding_apr': funding_apr,
                         'oi': h3_oi,
+                        'oi_ntl': h3_oi * price,
                         'volume': h3_volume,
                         'pct_change': h3_pct_change,
                     })
