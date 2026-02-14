@@ -178,7 +178,20 @@ The proxy caches `/info` read responses (metadata 300s, prices 5s, user state 2s
 | `HL_ACCOUNT_ADDRESS` | For trading/status | Hyperliquid wallet address |
 | `HL_SECRET_KEY` | For trading | API wallet private key |
 | `HL_TESTNET` | No | `true` for testnet (default), `false` for mainnet |
-| `HL_PROXY_URL` | Recommended | Caching proxy URL (default: `http://localhost:18731`). `status` auto-detects account abstraction mode (unified/portfolio margin) and shows the true portfolio value |
+| `HL_PROXY_URL` | Recommended | Caching proxy URL (default: `http://localhost:18731`) |
 | `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck |
 
 **Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`, `raw`, `polymarket`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY`.
+
+## Account Abstraction Modes
+
+Hyperliquid accounts operate in one of several modes that affect where balances live. The `status` command auto-detects the mode and shows it as a badge (`[unified]`, `[portfolio margin]`, or `[standard]`).
+
+| Mode | Badge | How balances work |
+|------|-------|-------------------|
+| **Unified** (default) | `[unified]` | Single balance per asset across all DEXes. Spot and perp share collateral. All balances appear in the spot clearinghouse. |
+| **Portfolio Margin** | `[portfolio margin]` | All eligible assets (HYPE, BTC, USDH, USDC) unified into one margin calculation. Most capital-efficient. Pre-alpha. |
+| **Standard** | `[standard]` | Separate balances for perps and spot on each DEX. No cross-collateralization. |
+| **DEX Abstraction** | `[unified]` | Deprecated. USDC defaults to perps balance, other collateral to spot. Shown as `[unified]` since behavior is similar. |
+
+**For position sizing, always use "Portfolio Value"** from `status`. In standard mode this equals the perp account value. In unified/portfolio margin mode it equals `perp accountValue + spot balances`, since funds can live in either clearinghouse. The "Perp Margin" sub-line (only shown for non-standard modes) is just the perp clearinghouse portion — don't use it for sizing.

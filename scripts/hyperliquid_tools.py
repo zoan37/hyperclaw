@@ -145,10 +145,9 @@ def format_pnl(pnl: float) -> str:
 def get_account_summary(info, address: str) -> dict:
     """Detect account abstraction mode and compute true portfolio value.
 
-    For unified/portfolio-margin accounts, the perp clearinghouse's accountValue
-    only reflects margin locked in perp positions.  The real balance lives in the
-    spot clearinghouse (USDC).  This helper merges both views so callers always
-    get the correct portfolio value.
+    In unified/dexAbstraction mode, spot and perp are separate pools.
+    The perp clearinghouse accountValue only reflects perp margin + PnL.
+    Total portfolio = perp accountValue + spot balances.
 
     Returns dict with keys:
         mode              - 'unified', 'portfolio_margin', or 'standard'
@@ -203,30 +202,13 @@ def get_account_summary(info, address: str) -> dict:
                         'hold': hold,
                     })
 
-            # Compute true portfolio value:
-            #   spot USDC total + unrealized perp PnL
-            usdc_total = 0
-            for b in raw_balances:
-                if b.get('coin', '').upper() == 'USDC':
-                    usdc_total = float(b.get('total', 0))
-                    break
-
-            # Sum unrealized PnL across all perp positions
-            total_unrealized = 0
-            for pos in perp_state.get('assetPositions', []):
-                szi = float(pos['position'].get('szi', 0))
-                if szi != 0:
-                    total_unrealized += float(pos['position'].get('unrealizedPnl', 0))
-
-            portfolio_value = usdc_total + total_unrealized
-
-            # Withdrawable for unified = spot USDC available (total - hold)
-            usdc_hold = 0
-            for b in raw_balances:
-                if b.get('coin', '').upper() == 'USDC':
-                    usdc_hold = float(b.get('hold', 0))
-                    break
-            withdrawable = usdc_total - usdc_hold
+            # In unified mode, spot and perp are separate pools.
+            # Total portfolio = perp accountValue + spot balances.
+            # (Confirmed by the portfolio endpoint which reports both summed.)
+            spot_value = sum(b['total'] for b in spot_balances)
+            portfolio_value = account_value + spot_value
+            withdrawable = float(perp_state.get('withdrawable', 0)) + \
+                sum(b['total'] - b['hold'] for b in spot_balances)
         except Exception:
             # Fallback: use perp values if spot query fails
             portfolio_value = account_value
