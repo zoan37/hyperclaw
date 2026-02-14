@@ -118,9 +118,9 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `polymarket [CATEGORY]` | Polymarket prediction data | `hyperliquid_tools.py polymarket crypto` |
+| `polymarket [CATEGORY]` | Active Polymarket prediction markets | `hyperliquid_tools.py polymarket crypto` |
 
-Categories: `crypto`, `btc`, `eth`, `trending`, `macro`
+Categories: `crypto` (default), `btc`, `eth`, `trending`, `macro`
 
 ### HIP-3 Trading
 

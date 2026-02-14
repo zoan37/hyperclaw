@@ -2262,135 +2262,81 @@ def cmd_polymarket(args):
 
     category = args.category.lower() if args.category else 'crypto'
 
+    # Map categories to API tags and client-side filters
+    TAG_MAP = {
+        'crypto': 'crypto',
+        'btc': 'crypto',
+        'eth': 'crypto',
+        'trending': None,  # No tag — just top by volume
+        'macro': 'politics',
+    }
+
+    TITLE_FILTER = {
+        'btc': lambda t: 'bitcoin' in t.lower() or 'btc' in t.lower(),
+        'eth': lambda t: 'ethereum' in t.lower() or 'eth' in t.lower(),
+    }
+
+    tag = TAG_MAP.get(category, 'crypto')
+    title_filter = TITLE_FILTER.get(category)
+
     print(f"\n{Colors.BOLD}{Colors.CYAN}POLYMARKET PREDICTIONS: {category.upper()}{Colors.END}")
     print("=" * 70)
 
     try:
-        # Define event slugs by category
-        event_slugs = {
-            'crypto': [
-                'what-price-will-bitcoin-hit-in-january-2026',
-                'what-price-will-ethereum-hit-in-january-2026',
-            ],
-            'btc': ['what-price-will-bitcoin-hit-in-january-2026'],
-            'eth': ['what-price-will-ethereum-hit-in-january-2026'],
-            'fed': [],  # Will search for Fed-related
-            'macro': [],  # Will search for macro events
-        }
+        url = 'https://gamma-api.polymarket.com/events?limit=20&active=true&closed=false'
+        if tag:
+            url += f'&tag={tag}'
 
-        slugs = event_slugs.get(category, event_slugs['crypto'])
+        r = httpx.get(url, timeout=15)
+        if r.status_code != 200:
+            print(f"{Colors.RED}API error: {r.status_code}{Colors.END}")
+            return
 
-        if slugs:
-            for slug in slugs:
-                url = f'https://gamma-api.polymarket.com/events?slug={slug}'
-                r = httpx.get(url, timeout=15)
-                if r.status_code == 200 and r.json():
-                    event = r.json()[0]
-                    title = event.get('title', 'Unknown')
-                    volume = float(event.get('volume', 0) or 0)
+        events = r.json()
+        if not events:
+            print(f"{Colors.DIM}No active events found for '{category}'.{Colors.END}")
+            return
 
-                    print(f"\n{Colors.BOLD}{title}{Colors.END}")
-                    print(f"Total Volume: ${volume:,.0f}")
-                    print()
+        # Client-side title filter for btc/eth
+        if title_filter:
+            events = [e for e in events if title_filter(e.get('title', ''))]
 
-                    markets = event.get('markets', [])
-                    # Sort by volume
-                    markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
+        # Sort by volume descending
+        events.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
 
-                    for m in markets[:15]:
-                        question = m.get('question', '')
-                        prices = m.get('outcomePrices', '[]')
-                        try:
-                            p = json.loads(prices) if isinstance(prices, str) else prices
-                            yes_prob = float(p[0]) * 100 if p and len(p) > 0 else 0
-                        except:
-                            yes_prob = 0
-                        vol = float(m.get('volume', 0) or 0)
+        if not events:
+            print(f"{Colors.DIM}No matching events found for '{category}'.{Colors.END}")
+            return
 
-                        # Color code by probability
-                        if yes_prob > 70:
-                            prob_color = Colors.GREEN
-                        elif yes_prob < 30:
-                            prob_color = Colors.RED
-                        else:
-                            prob_color = Colors.YELLOW
+        for event in events[:10]:
+            title = event.get('title', 'Unknown')
+            volume = float(event.get('volume', 0) or 0)
 
-                        # Shorten question
-                        q_short = question.replace('Will Bitcoin ', 'BTC ').replace('Will Ethereum ', 'ETH ')
-                        q_short = q_short.replace('in January?', 'Jan').replace(' in January', ' Jan')
+            print(f"\n{Colors.BOLD}{title}{Colors.END}")
+            print(f"  Volume: ${volume:,.0f}")
 
-                        print(f"  {q_short}: {prob_color}{yes_prob:5.1f}%{Colors.END} (${vol:,.0f})")
+            markets = event.get('markets', [])
+            markets.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
 
-        # Also fetch trending/high volume markets
-        if category in ['trending', 'all', 'macro']:
-            print(f"\n{Colors.BOLD}High Volume Markets:{Colors.END}")
-            url = 'https://gamma-api.polymarket.com/events?limit=20&active=true&closed=false'
-            r = httpx.get(url, timeout=15)
-            if r.status_code == 200:
-                events = r.json()
-                # Sort by volume
-                events.sort(key=lambda x: float(x.get('volume', 0) or 0), reverse=True)
+            for m in markets[:8]:
+                question = m.get('question', '')
+                prices = m.get('outcomePrices', '[]')
+                try:
+                    p = json.loads(prices) if isinstance(prices, str) else prices
+                    yes_prob = float(p[0]) * 100 if p and len(p) > 0 else 0
+                except:
+                    yes_prob = 0
+                vol = float(m.get('volume', 0) or 0)
 
-                for e in events[:10]:
-                    title = e.get('title', '')[:60]
-                    vol = float(e.get('volume', 0) or 0)
-                    if vol > 100000:
-                        print(f"  {title}: ${vol:,.0f}")
+                # Color code by probability
+                if yes_prob > 70:
+                    prob_color = Colors.GREEN
+                elif yes_prob < 30:
+                    prob_color = Colors.RED
+                else:
+                    prob_color = Colors.YELLOW
 
-        # Summary for trading
-        print(f"\n{Colors.BOLD}Trading Signal Summary:{Colors.END}")
-
-        if category in ['crypto', 'btc']:
-            # Fetch BTC data and summarize
-            url = 'https://gamma-api.polymarket.com/events?slug=what-price-will-bitcoin-hit-in-january-2026'
-            r = httpx.get(url, timeout=15)
-            if r.status_code == 200 and r.json():
-                markets = r.json()[0].get('markets', [])
-
-                # Find key levels
-                upside_probs = {}
-                downside_probs = {}
-
-                for m in markets:
-                    q = m.get('question', '').lower()
-                    prices = m.get('outcomePrices', '[]')
-                    try:
-                        p = json.loads(prices) if isinstance(prices, str) else prices
-                        prob = float(p[0]) * 100 if p else 0
-                    except:
-                        prob = 0
-
-                    if 'reach' in q:
-                        # Extract price level
-                        for word in q.split():
-                            if word.startswith('$'):
-                                try:
-                                    level = int(word.replace('$', '').replace(',', ''))
-                                    upside_probs[level] = prob
-                                except:
-                                    pass
-                    elif 'dip' in q:
-                        for word in q.split():
-                            if word.startswith('$'):
-                                try:
-                                    level = int(word.replace('$', '').replace(',', ''))
-                                    downside_probs[level] = prob
-                                except:
-                                    pass
-
-                if upside_probs:
-                    print(f"\n  BTC Upside Odds (Jan):")
-                    for level in sorted(upside_probs.keys()):
-                        prob = upside_probs[level]
-                        color = Colors.GREEN if prob > 20 else Colors.YELLOW if prob > 5 else Colors.RED
-                        print(f"    ${level:,}: {color}{prob:.1f}%{Colors.END}")
-
-                if downside_probs:
-                    print(f"\n  BTC Downside Risk (Jan):")
-                    for level in sorted(downside_probs.keys(), reverse=True):
-                        prob = downside_probs[level]
-                        color = Colors.RED if prob > 20 else Colors.YELLOW if prob > 5 else Colors.GREEN
-                        print(f"    ${level:,}: {color}{prob:.1f}%{Colors.END}")
+                print(f"    {question}: {prob_color}{yes_prob:5.1f}%{Colors.END} (${vol:,.0f})")
 
         print()
 
@@ -2605,9 +2551,9 @@ def main():
     hip3_parser = subparsers.add_parser('hip3', help='Get HIP-3 equity perp data (trade.xyz)')
     hip3_parser.add_argument('coin', nargs='?', help='HIP-3 asset (e.g., META, TSLA) - leave empty for all')
 
-    polymarket_parser = subparsers.add_parser('polymarket', help='Get Polymarket prediction market data')
+    polymarket_parser = subparsers.add_parser('polymarket', help='Get active Polymarket prediction markets')
     polymarket_parser.add_argument('category', nargs='?', default='crypto',
-                                   help='Category: crypto, btc, eth, trending, macro (default: crypto)')
+                                   help='crypto | btc | eth | trending | macro (default: crypto)')
 
     subparsers.add_parser('dexes', help='List all HIP-3 dexes and their assets')
 
