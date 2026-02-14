@@ -237,6 +237,54 @@ def get_account_summary(info, address: str) -> dict:
     }
 
 
+def _get_all_positions(info, address):
+    """Fetch positions from native perps + all HIP-3 dexes."""
+    positions = []
+    try:
+        state = info.user_state(address)
+        positions.extend(state.get('assetPositions', []))
+    except Exception:
+        pass
+    try:
+        for dex in info.perp_dexs():
+            if dex is None:
+                continue
+            name = dex.get('name', '')
+            if not name:
+                continue
+            try:
+                dex_state = info.user_state(address, dex=name)
+                positions.extend(dex_state.get('assetPositions', []))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return positions
+
+
+def _get_all_open_orders(info, address):
+    """Fetch open orders from native perps + all HIP-3 dexes."""
+    orders = []
+    try:
+        orders.extend(info.frontend_open_orders(address))
+    except Exception:
+        pass
+    try:
+        for dex in info.perp_dexs():
+            if dex is None:
+                continue
+            name = dex.get('name', '')
+            if not name:
+                continue
+            try:
+                orders.extend(info.frontend_open_orders(address, dex=name))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return orders
+
+
 # ============================================================================
 # READ-ONLY COMMANDS
 # ============================================================================
@@ -252,10 +300,6 @@ def cmd_status(args):
 
     try:
         summary = get_account_summary(info, config['account_address'])
-        user_state = summary['perp_state']
-
-        # Also get xyz (HIP-3) state
-        xyz_state = info.user_state(config['account_address'], dex='xyz')
 
         print(f"\n{Colors.BOLD}Account Summary:{Colors.END} {summary['mode_label']}")
         print(f"  Portfolio Value: {format_price(summary['portfolio_value'])}")
@@ -271,10 +315,8 @@ def cmd_status(args):
                 hold_str = f" (hold: ${bal['hold']:,.2f})" if bal['hold'] > 0.01 else ""
                 print(f"  {bal['coin']:<8} ${bal['total']:,.2f}{hold_str}")
 
-        # Positions (combine main + xyz HIP-3)
-        positions = user_state.get('assetPositions', [])
-        xyz_positions = xyz_state.get('assetPositions', [])
-        all_positions = positions + xyz_positions
+        # Positions (native + all HIP-3 dexes)
+        all_positions = _get_all_positions(info, config['account_address'])
         open_positions = [p for p in all_positions if float(p['position']['szi']) != 0]
 
         if open_positions:
@@ -313,15 +355,14 @@ def cmd_status(args):
 
 def cmd_positions(args):
     """Show detailed position information."""
-    info, config = setup_info(require_credentials=True)
+    info, config = setup_info(require_credentials=True, include_hip3=True)
 
     print(f"\n{Colors.BOLD}{Colors.CYAN}POSITION DETAILS{Colors.END}")
     print("=" * 60)
 
     try:
-        user_state = info.user_state(config['account_address'])
-        positions = user_state.get('assetPositions', [])
-        open_positions = [p for p in positions if float(p['position']['szi']) != 0]
+        all_positions = _get_all_positions(info, config['account_address'])
+        open_positions = [p for p in all_positions if float(p['position']['szi']) != 0]
 
         if not open_positions:
             print(f"\n{Colors.DIM}No open positions{Colors.END}")
@@ -375,18 +416,7 @@ def cmd_check(args):
     try:
         # Get account summary with mode detection
         summary = get_account_summary(info, address)
-        user_state = summary['perp_state']
-        positions = user_state.get('assetPositions', [])
-
-        # Try to get HIP-3 positions from known dexes
-        for dex in ['xyz', 'vntl', 'flx', 'cash', 'km']:
-            try:
-                dex_state = info.user_state(address, dex=dex)
-                dex_positions = dex_state.get('assetPositions', [])
-                positions.extend(dex_positions)
-            except Exception:
-                pass
-
+        positions = _get_all_positions(info, address)
         open_positions = [p for p in positions if float(p['position']['szi']) != 0]
 
         if not open_positions:
@@ -677,10 +707,10 @@ def cmd_book(args):
 
 def cmd_orders(args):
     """List open orders with trigger/TP/SL details."""
-    info, config = setup_info(require_credentials=True)
+    info, config = setup_info(require_credentials=True, include_hip3=True)
 
     try:
-        open_orders = info.frontend_open_orders(config['account_address'])
+        open_orders = _get_all_open_orders(info, config['account_address'])
 
         print(f"\n{Colors.BOLD}Open Orders:{Colors.END}")
 
