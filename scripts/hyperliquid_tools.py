@@ -2290,38 +2290,42 @@ def cmd_scan(args):
         assets_by_funding = sorted(assets, key=lambda x: x['funding_apr'])
 
         print(f"\n{Colors.BOLD}{Colors.GREEN}TOP {top_n} NEGATIVE FUNDING (shorts paying longs - LONG opportunities):{Colors.END}")
-        print(f"{'Asset':<12} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'Open Interest':>15} {'24h Volume':>15}")
-        print("-" * 80)
+        print(f"{'Asset':<12} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'24h Chg':>9} {'Open Interest':>15} {'24h Volume':>15}")
+        print("-" * 89)
 
         for a in assets_by_funding[:top_n]:
             funding_color = Colors.GREEN if a['funding_apr'] < -50 else Colors.YELLOW if a['funding_apr'] < 0 else Colors.END
-            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
+            chg_color = Colors.GREEN if a['pct_change'] > 0 else Colors.RED if a['pct_change'] < 0 else Colors.END
+            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% {chg_color}{a['pct_change']:>+8.2f}%{Colors.END} ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
 
         print(f"\n{Colors.BOLD}{Colors.RED}TOP {top_n} POSITIVE FUNDING (longs paying shorts - SHORT opportunities or avoid):{Colors.END}")
-        print(f"{'Asset':<12} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'Open Interest':>15} {'24h Volume':>15}")
-        print("-" * 80)
+        print(f"{'Asset':<12} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'24h Chg':>9} {'Open Interest':>15} {'24h Volume':>15}")
+        print("-" * 89)
 
         for a in assets_by_funding[-top_n:][::-1]:
             funding_color = Colors.RED if a['funding_apr'] > 50 else Colors.YELLOW if a['funding_apr'] > 0 else Colors.END
-            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
+            chg_color = Colors.GREEN if a['pct_change'] > 0 else Colors.RED if a['pct_change'] < 0 else Colors.END
+            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_hr']:>11.4f}%{Colors.END} {a['funding_apr']:>9.1f}% {chg_color}{a['pct_change']:>+8.2f}%{Colors.END} ${a['oi']:>13,.0f} ${a['volume']:>13,.0f}")
 
         # High volume movers
         assets_by_volume = sorted(assets, key=lambda x: x['volume'], reverse=True)[:10]
         print(f"\n{Colors.BOLD}{Colors.BLUE}TOP 10 BY VOLUME (most liquid):{Colors.END}")
-        print(f"{'Asset':<12} {'Price':>12} {'Funding APR':>12} {'24h Volume':>15}")
-        print("-" * 55)
+        print(f"{'Asset':<12} {'Price':>12} {'Funding APR':>12} {'24h Chg':>9} {'24h Volume':>15}")
+        print("-" * 64)
         for a in assets_by_volume:
             funding_color = Colors.GREEN if a['funding_apr'] < -10 else Colors.RED if a['funding_apr'] > 10 else Colors.YELLOW
-            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_apr']:>11.1f}%{Colors.END} ${a['volume']:>13,.0f}")
+            chg_color = Colors.GREEN if a['pct_change'] > 0 else Colors.RED if a['pct_change'] < 0 else Colors.END
+            print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_apr']:>11.1f}%{Colors.END} {chg_color}{a['pct_change']:>+8.2f}%{Colors.END} ${a['volume']:>13,.0f}")
 
         # HIP-3 section display
         print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 PERPS:{Colors.END}")
-        print(f"{'Asset':<14} {'Price':>12} {'Funding/hr':>12} {'APR':>10}")
-        print("-" * 50)
+        print(f"{'Asset':<14} {'Price':>12} {'Funding/hr':>12} {'APR':>10} {'24h Chg':>9}")
+        print("-" * 59)
 
         for h in hip3_data:
             funding_color = Colors.GREEN if h['funding_apr'] < -10 else Colors.RED if h['funding_apr'] > 10 else Colors.YELLOW
-            print(f"{h['name']:<14} ${h['price']:>10,.2f} {funding_color}{h['funding_hr']:>11.4f}%{Colors.END} {h['funding_apr']:>9.1f}%")
+            chg_color = Colors.GREEN if h['pct_change'] > 0 else Colors.RED if h['pct_change'] < 0 else Colors.END
+            print(f"{h['name']:<14} ${h['price']:>10,.2f} {funding_color}{h['funding_hr']:>11.4f}%{Colors.END} {h['funding_apr']:>9.1f}% {chg_color}{h['pct_change']:>+8.2f}%{Colors.END}")
 
         print(f"\n{Colors.BOLD}Summary:{Colors.END}")
         negative_funding = [a for a in assets if a['funding_apr'] < -20]
