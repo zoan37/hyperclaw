@@ -60,7 +60,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | `orders` | Open orders | `hyperliquid_tools.py orders` |
 | `check` | Position health check (book ratio, funding, PnL, leverage, liquidation warnings) | `hyperliquid_tools.py check` or `check --address 0x...` |
 | `user-funding` | Your funding payments received/paid | `hyperliquid_tools.py user-funding --lookback 7d` |
-| `portfolio` | Portfolio performance (PnL, volume by period) | `hyperliquid_tools.py portfolio` |
+| `portfolio` | Portfolio performance (PnL, volume by period) | `hyperliquid_tools.py portfolio` or `portfolio --address 0x...` |
 | `swap` | Swap USDC ↔ HIP-3 dex collateral (USDH, USDe, USDT0) | `hyperliquid_tools.py swap 20` or `swap 20 --token USDe` or `swap 10 --to-usdc` |
 
 ### Market Data

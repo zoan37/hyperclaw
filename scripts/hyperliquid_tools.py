@@ -1940,16 +1940,30 @@ def cmd_user_funding(args):
 
 def cmd_portfolio(args):
     """Show portfolio performance overview."""
-    info, config = setup_info(require_credentials=True)
+    info, config = setup_info(require_credentials=False)
+
+    address = args.address if hasattr(args, 'address') and args.address else config.get('account_address', '')
+    if not address:
+        print(f"{Colors.RED}Error: No account address. Set HL_ACCOUNT_ADDRESS or use --address.{Colors.END}")
+        return
 
     try:
-        data = info.portfolio(config['account_address'])
+        # Show current portfolio value as header
+        try:
+            summary = get_account_summary(info, address)
+            pv = summary['portfolio_value']
+            mode_label = summary['mode_label']
+            print(f"\n{Colors.BOLD}Portfolio Performance{Colors.END} {mode_label}")
+            print("=" * 60)
+            print(f"  Current Value: ${pv:>,.2f}")
+        except Exception:
+            print(f"\n{Colors.BOLD}Portfolio Performance{Colors.END}")
+            print("=" * 60)
+
+        data = info.portfolio(address)
         if not data:
             print("No portfolio data available")
             return
-
-        print(f"\n{Colors.BOLD}Portfolio Performance{Colors.END}")
-        print("=" * 60)
 
         # API returns [["day", {data}], ["week", {data}], ...] or dict
         periods = {}
@@ -2747,7 +2761,8 @@ def main():
     uf_parser = subparsers.add_parser('user-funding', help='Your funding payments received/paid')
     uf_parser.add_argument('--lookback', default='7d', help='Lookback period: e.g., 24h, 7d, 2w (default: 7d)')
 
-    subparsers.add_parser('portfolio', help='Portfolio performance overview')
+    portfolio_parser = subparsers.add_parser('portfolio', help='Portfolio performance overview')
+    portfolio_parser.add_argument('--address', help='Account address (overrides HL_ACCOUNT_ADDRESS)')
 
     # Trading commands
     leverage_parser = subparsers.add_parser('leverage', help='Set leverage for an asset')
