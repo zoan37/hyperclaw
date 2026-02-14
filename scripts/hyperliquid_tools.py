@@ -939,7 +939,7 @@ def cmd_transfer(args):
                     filled = status['filled']
                     print(f"\n{Colors.GREEN}Swapped {filled.get('totalSz')} {token_name} @ {filled.get('avgPx')}{Colors.END}")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Swap failed: {result}{Colors.END}")
 
@@ -985,6 +985,28 @@ def _get_dex_collateral(info, dex_name):
     except Exception:
         return (0, 'USDC', None)
 
+
+
+def _humanize_error(error_text: str, info) -> str:
+    """Replace cryptic asset IDs in API errors with human-readable coin names.
+
+    e.g. 'Order must have minimum value of $10. asset=184'
+      -> 'Order must have minimum value of $10. asset=OM'
+    """
+    import re
+    match = re.search(r'asset=(\d+)', error_text)
+    if not match:
+        return error_text
+    asset_id = int(match.group(1))
+    try:
+        meta = info.meta_and_asset_ctxs()
+        universe = meta[0]['universe']
+        if 0 <= asset_id < len(universe):
+            name = universe[asset_id].get('name', f'#{asset_id}')
+            return error_text.replace(f'asset={asset_id}', f'asset={name}')
+    except Exception:
+        pass
+    return error_text
 
 
 def _handle_margin_error(error_text, coin, info, config):
@@ -1066,7 +1088,7 @@ def cmd_buy(args):
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                     print(f"  OID: {filled.get('oid')}")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
                     _handle_margin_error(status['error'], coin, info, config)
         else:
             error_text = str(result)
@@ -1118,7 +1140,7 @@ def cmd_sell(args):
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                     print(f"  OID: {filled.get('oid')}")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
                     _handle_margin_error(status['error'], coin, info, config)
         else:
             error_text = str(result)
@@ -1164,7 +1186,7 @@ def cmd_limit_buy(args):
                     print(f"  Size: {filled.get('totalSz')}")
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
 
@@ -1207,7 +1229,7 @@ def cmd_limit_sell(args):
                     print(f"  Size: {filled.get('totalSz')}")
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
 
@@ -1261,7 +1283,7 @@ def cmd_stop_loss(args):
                     print(f"  OID: {status['resting'].get('oid')}")
                     print(f"  Type: Market order when triggered")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
 
@@ -1315,7 +1337,7 @@ def cmd_take_profit(args):
                     print(f"  OID: {status['resting'].get('oid')}")
                     print(f"  Type: Market order when triggered")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
 
@@ -1375,7 +1397,7 @@ def cmd_close(args):
                     print(f"  Size: {filled.get('totalSz')}")
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Close failed: {result}{Colors.END}")
 
@@ -1448,7 +1470,7 @@ def cmd_cancel_all(args):
                 if status == 'success':
                     print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
                 elif isinstance(status, dict) and 'error' in status:
-                    print(f"  {Colors.RED}Failed {coin} order {oid}: {status['error']}{Colors.END}")
+                    print(f"  {Colors.RED}Failed {coin} order {oid}: {_humanize_error(status['error'], info)}{Colors.END}")
                 else:
                     print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
             print(f"\n{Colors.GREEN}Done!{Colors.END}")
@@ -1512,7 +1534,7 @@ def cmd_modify_order(args):
                     print(f"  Size: {filled.get('totalSz')}")
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                 elif 'error' in status:
-                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
         else:
             print(f"\n{Colors.RED}Modify failed: {result}{Colors.END}")
 
@@ -2122,68 +2144,54 @@ def cmd_scan(args):
             funding_color = Colors.GREEN if a['funding_apr'] < -10 else Colors.RED if a['funding_apr'] > 10 else Colors.YELLOW
             print(f"{a['name']:<12} ${a['price']:>10,.2f} {funding_color}{a['funding_apr']:>11.1f}%{Colors.END} ${a['volume']:>13,.0f}")
 
-        # HIP-3 Equity Perps (trade.xyz)
-        print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 PERPS (trade.xyz - equities, commodities, forex):{Colors.END}")
+        # HIP-3 Perps (all dexes) — bulk fetch predicted funding via metaAndAssetCtxs
+        import requests as req
+
+        hip3_data = []
+        try:
+            all_dexes = info.perp_dexs()
+            dex_names = [d.get('name') for d in all_dexes if d is not None and d.get('name')]
+        except Exception:
+            dex_names = ['xyz']
+
+        print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 PERPS:{Colors.END}")
         print(f"{'Asset':<14} {'Price':>12} {'Funding/hr':>12} {'APR':>10}")
         print("-" * 50)
 
-        import requests as req
-
-        # Fetch all HIP-3 assets dynamically
-        try:
-            meta = info.meta(dex='xyz')
-            universe = meta.get('universe', [])
-            hip3_assets = [a.get('name', '') for a in universe if a.get('name')]
-        except:
-            # Fallback to known assets
-            hip3_assets = [
-                'xyz:TSLA', 'xyz:NVDA', 'xyz:AAPL', 'xyz:GOOGL', 'xyz:AMZN',
-                'xyz:META', 'xyz:MSFT', 'xyz:HOOD', 'xyz:PLTR', 'xyz:MSTR',
-                'xyz:AMD', 'xyz:NFLX', 'xyz:COIN', 'xyz:XYZ100',
-                'xyz:GOLD', 'xyz:SILVER', 'xyz:COPPER', 'xyz:NATGAS',
-            ]
-
-        hip3_data = []
-        for coin in hip3_assets:
+        for dex in dex_names:
             try:
-                # Get funding
                 resp = req.post(
                     config['api_url'] + "/info",
-                    json={"type": "fundingHistory", "coin": coin, "startTime": 0},
-                    timeout=5
+                    json={"type": "metaAndAssetCtxs", "dex": dex},
+                    timeout=10
                 )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data:
-                        latest = data[-1]
-                        funding = float(latest.get('fundingRate', 0))
+                if resp.status_code != 200:
+                    continue
+                dex_meta = resp.json()
+                dex_universe = dex_meta[0]['universe']
+                dex_ctxs = dex_meta[1]
 
-                        # Get price from L2 book
-                        book_resp = req.post(
-                            config['api_url'] + "/info",
-                            json={"type": "l2Book", "coin": coin},
-                            timeout=5
-                        )
-                        price = 0
-                        if book_resp.status_code == 200:
-                            book = book_resp.json()
-                            levels = book.get('levels', [])
-                            if len(levels) >= 2 and levels[0] and levels[1]:
-                                price = (float(levels[0][0]['px']) + float(levels[1][0]['px'])) / 2
+                for i, asset in enumerate(dex_universe):
+                    coin = asset.get('name', '')
+                    if not coin:
+                        continue
+                    ctx = dex_ctxs[i]
+                    funding = float(ctx.get('funding', 0))
+                    price = float(ctx.get('markPx', 0))
+                    funding_hr = funding * 100
+                    funding_apr = funding * 24 * 365 * 100
 
-                        funding_hr = funding * 100
-                        funding_apr = funding * 24 * 365 * 100
-                        hip3_data.append({
-                            'name': coin,
-                            'price': price,
-                            'funding_hr': funding_hr,
-                            'funding_apr': funding_apr
-                        })
+                    hip3_data.append({
+                        'name': coin,
+                        'price': price,
+                        'funding_hr': funding_hr,
+                        'funding_apr': funding_apr
+                    })
 
-                        funding_color = Colors.GREEN if funding_apr < -10 else Colors.RED if funding_apr > 10 else Colors.YELLOW
-                        print(f"{coin:<14} ${price:>10,.2f} {funding_color}{funding_hr:>11.4f}%{Colors.END} {funding_apr:>9.1f}%")
-            except Exception as e:
-                pass  # Skip failed assets
+                    funding_color = Colors.GREEN if funding_apr < -10 else Colors.RED if funding_apr > 10 else Colors.YELLOW
+                    print(f"{coin:<14} ${price:>10,.2f} {funding_color}{funding_hr:>11.4f}%{Colors.END} {funding_apr:>9.1f}%")
+            except Exception:
+                pass
 
         print(f"\n{Colors.BOLD}Summary:{Colors.END}")
         negative_funding = [a for a in assets if a['funding_apr'] < -20]
