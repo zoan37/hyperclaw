@@ -205,6 +205,11 @@ def get_account_summary(info, address: str) -> dict:
             # In unified mode, spot and perp are separate pools.
             # Total portfolio = perp accountValue + spot balances.
             # (Confirmed by the portfolio endpoint which reports both summed.)
+            # TODO: This assumes spot balances are USDC (1 unit = $1). If spot
+            # trading is added (BTC, HYPE, ETH, etc.), each balance must be
+            # converted to USD via mid price: spot_value = sum(total * price).
+            # Without this, non-stablecoin spot holdings will be massively
+            # understated (e.g. 0.5 BTC counted as $0.50 instead of ~$34k).
             spot_value = sum(b['total'] for b in spot_balances)
             portfolio_value = account_value + spot_value
             withdrawable = float(perp_state.get('withdrawable', 0)) + \

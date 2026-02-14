@@ -58,6 +58,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | `status` | Account balance, account mode, positions, PnL (handles unified/portfolio margin accounts) | `hyperliquid_tools.py status` |
 | `positions` | Detailed position info (leverage, liquidation) | `hyperliquid_tools.py positions` |
 | `orders` | Open orders | `hyperliquid_tools.py orders` |
+| `check` | Position health check (book ratio, funding, PnL, leverage, liquidation warnings) | `hyperliquid_tools.py check` or `check --address 0x...` |
 | `user-funding` | Your funding payments received/paid | `hyperliquid_tools.py user-funding --lookback 7d` |
 | `portfolio` | Portfolio performance (PnL, volume by period) | `hyperliquid_tools.py portfolio` |
 
@@ -179,6 +180,7 @@ The proxy caches `/info` read responses (metadata 300s, prices 5s, user state 2s
 | `HL_SECRET_KEY` | For trading | API wallet private key |
 | `HL_TESTNET` | No | `true` for testnet (default), `false` for mainnet |
 | `HL_PROXY_URL` | Recommended | Caching proxy URL (default: `http://localhost:18731`) |
+| `HL_ENV_FILE` | No | Override `.env` file path. When set, loads env vars from this file instead of default `.env` discovery. Useful for wrapper scripts that route to hyperclaw from other projects. |
 | `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck |
 
 **Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`, `raw`, `polymarket`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY`.
