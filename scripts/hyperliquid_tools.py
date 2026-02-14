@@ -2293,6 +2293,62 @@ def cmd_sentiment(args):
         print(f"{Colors.RED}Error: {e}{Colors.END}")
 
 
+def cmd_search(args):
+    """General-purpose search using Grok's web and X/Twitter search."""
+    query = args.query
+    web_only = args.web
+    x_only = args.x
+
+    grok_api_key = os.getenv('XAI_API_KEY')
+    if not grok_api_key:
+        print(f"{Colors.RED}Error: XAI_API_KEY not set in .env{Colors.END}")
+        print("Add your Grok API key to use search")
+        return
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}SEARCH: \"{query}\"{Colors.END}")
+    print("=" * 60)
+
+    try:
+        import requests as req
+
+        def _grok_search(prompt, tool_type):
+            response = req.post(
+                "https://api.x.ai/v1/responses",
+                headers={
+                    "Authorization": f"Bearer {grok_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "grok-4-1-fast",
+                    "tools": [{"type": tool_type}],
+                    "input": [{"role": "user", "content": prompt}]
+                },
+                timeout=30
+            )
+            if response.status_code == 200:
+                data = response.json()
+                for item in data.get('output', []):
+                    if item.get('type') == 'message':
+                        for content in item.get('content', []):
+                            if content.get('type') in ('text', 'output_text'):
+                                print(f"{Colors.DIM}{content.get('text', '')}{Colors.END}")
+                return True
+            else:
+                print(f"{Colors.RED}Error: {response.status_code}{Colors.END}")
+                return False
+
+        if not x_only:
+            print(f"\n{Colors.BOLD}Web:{Colors.END}")
+            _grok_search(query, "web_search")
+
+        if not web_only:
+            print(f"\n{Colors.BOLD}X/Twitter:{Colors.END}")
+            _grok_search(query, "x_search")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error: {e}{Colors.END}")
+
+
 def cmd_unlocks(args):
     """Check token unlock schedules using Grok search."""
     import requests as req
@@ -2748,6 +2804,11 @@ def main():
     sentiment_parser = subparsers.add_parser('sentiment', help='Get Grok sentiment analysis for an asset')
     sentiment_parser.add_argument('coin', help='Asset to analyze sentiment for')
 
+    search_parser = subparsers.add_parser('search', help='Search web and X/Twitter via Grok')
+    search_parser.add_argument('query', help='Search query (any topic)')
+    search_parser.add_argument('--web', action='store_true', help='Web search only')
+    search_parser.add_argument('--x', action='store_true', help='X/Twitter search only')
+
     hip3_parser = subparsers.add_parser('hip3', help='Get HIP-3 equity perp data (trade.xyz)')
     hip3_parser.add_argument('coin', nargs='?', help='HIP-3 asset (e.g., META, TSLA) - leave empty for all')
 
@@ -2802,6 +2863,7 @@ def main():
         'raw': cmd_raw,
         'scan': cmd_scan,
         'sentiment': cmd_sentiment,
+        'search': cmd_search,
         'hip3': cmd_hip3,
         'polymarket': cmd_polymarket,
         'dexes': cmd_dexes,
