@@ -449,6 +449,36 @@ def cmd_check(args):
         print(f"\n  Portfolio Value: {format_price(summary['portfolio_value'])} {summary['mode_label']} | Withdrawable: {format_price(summary['withdrawable'])}")
         print()
 
+        # Pre-fetch predicted funding rates in bulk (one call for native, one per HIP-3 dex)
+        funding_rates = {}  # coin -> predicted funding rate (float)
+        try:
+            meta = info.meta_and_asset_ctxs()
+            for i, asset in enumerate(meta[0]['universe']):
+                funding_rates[asset['name']] = float(meta[1][i].get('funding', 0))
+        except Exception:
+            pass
+
+        # For HIP-3 positions, fetch per-dex meta on demand
+        hip3_dexes_fetched = set()
+        hip3_coins = [p['position']['coin'] for p in open_positions if ':' in p['position']['coin']]
+        for coin in hip3_coins:
+            dex = coin.split(':')[0]
+            if dex in hip3_dexes_fetched:
+                continue
+            try:
+                resp = req.post(
+                    config['api_url'] + "/info",
+                    json={"type": "metaAndAssetCtxs", "dex": dex},
+                    timeout=10
+                )
+                if resp.status_code == 200:
+                    dex_meta = resp.json()
+                    for i, asset in enumerate(dex_meta[0]['universe']):
+                        funding_rates[asset['name']] = float(dex_meta[1][i].get('funding', 0))
+                hip3_dexes_fetched.add(dex)
+            except Exception:
+                pass
+
         for pos in open_positions:
             p = pos['position']
             coin = p['coin']
@@ -507,37 +537,25 @@ def cmd_check(args):
             except Exception:
                 book_color = Colors.YELLOW
 
-            # Get funding rate
+            # Get predicted funding rate from pre-fetched bulk data
             funding_str = "N/A"
             funding_apr = 0
-            try:
-                funding_resp = req.post(
-                    config['api_url'] + "/info",
-                    json={"type": "fundingHistory", "coin": coin, "startTime": 0},
-                    timeout=10
-                )
-                if funding_resp.status_code == 200:
-                    data = funding_resp.json()
-                    if data:
-                        latest = data[-1]
-                        funding = float(latest.get('fundingRate', 0))
-                        funding_apr = funding * 24 * 365 * 100
-                        funding_hr = funding * 100
+            funding = funding_rates.get(coin)
+            if funding is not None:
+                funding_apr = funding * 24 * 365 * 100
 
-                        # Determine if we're collecting or paying
-                        if side == "LONG":
-                            collecting = funding < 0  # shorts pay longs
-                        else:
-                            collecting = funding > 0  # longs pay shorts
+                # Determine if we're collecting or paying
+                if side == "LONG":
+                    collecting = funding < 0  # shorts pay longs
+                else:
+                    collecting = funding > 0  # longs pay shorts
 
-                        if collecting:
-                            funding_str = f"{Colors.GREEN}{funding_apr:+.0f}% APR (collecting){Colors.END}"
-                        else:
-                            funding_str = f"{Colors.RED}{funding_apr:+.0f}% APR (paying){Colors.END}"
-                            if abs(funding_apr) > 100:
-                                warnings.append(f"High funding cost: {abs(funding_apr):.0f}% APR")
-            except Exception:
-                pass
+                if collecting:
+                    funding_str = f"{Colors.GREEN}{funding_apr:+.0f}% APR (collecting){Colors.END}"
+                else:
+                    funding_str = f"{Colors.RED}{funding_apr:+.0f}% APR (paying){Colors.END}"
+                    if abs(funding_apr) > 100:
+                        warnings.append(f"High funding cost: {abs(funding_apr):.0f}% APR")
 
             # Price change from entry
             if entry_px > 0:
