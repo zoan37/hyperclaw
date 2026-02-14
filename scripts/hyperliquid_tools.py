@@ -144,6 +144,26 @@ def format_pnl(pnl: float) -> str:
         return f"{Colors.RED}-${abs(pnl):,.2f}{Colors.END}"
 
 
+def _invalidate_proxy_cache(config: dict):
+    """Invalidate cached user state on the proxy after a trade.
+
+    Trades bypass the proxy (SDK signs against the real API URL), so the proxy
+    doesn't know state changed.  This pokes POST /cache/clear to drop stale
+    entries so the next status/positions call sees fresh data.
+    """
+    proxy_url = os.getenv('HL_PROXY_URL')
+    if not proxy_url:
+        return
+    address = config.get('account_address', '')
+    if not address:
+        return
+    try:
+        import requests
+        requests.post(f"{proxy_url}/cache/clear", json={"user": address}, timeout=2)
+    except Exception:
+        pass  # Proxy may be down; not critical
+
+
 def get_account_summary(info, address: str) -> dict:
     """Detect account abstraction mode and compute true portfolio value.
 
@@ -852,6 +872,7 @@ def cmd_leverage(args):
     try:
         result = exchange.update_leverage(leverage, coin, is_cross)
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             print(f"{Colors.GREEN}Leverage updated!{Colors.END}")
             print(f"  {coin}: {leverage}x {margin_type}")
         else:
@@ -911,6 +932,7 @@ def cmd_transfer(args):
             result = exchange.order(spot_pair, True, float(amount), 1.002, {'limit': {'tif': 'Ioc'}})
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'filled' in status:
@@ -1034,6 +1056,7 @@ def cmd_buy(args):
         result = exchange.market_open(coin, True, size, None, 0.01)  # 1% slippage
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'filled' in status:
@@ -1085,6 +1108,7 @@ def cmd_sell(args):
         result = exchange.market_open(coin, False, size, None, 0.01)  # 1% slippage
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'filled' in status:
@@ -1128,6 +1152,7 @@ def cmd_limit_buy(args):
         result = exchange.order(coin, True, size, price, {"limit": {"tif": "Gtc"}})
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'resting' in status:
@@ -1170,6 +1195,7 @@ def cmd_limit_sell(args):
         result = exchange.order(coin, False, size, price, {"limit": {"tif": "Gtc"}})
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'resting' in status:
@@ -1223,6 +1249,7 @@ def cmd_stop_loss(args):
         result = exchange.order(coin, is_buy, size, trigger_price, order_type, reduce_only=True)
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'resting' in status:
@@ -1276,6 +1303,7 @@ def cmd_take_profit(args):
         result = exchange.order(coin, is_buy, size, trigger_price, order_type, reduce_only=True)
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'resting' in status:
@@ -1338,6 +1366,7 @@ def cmd_close(args):
         result = exchange.market_close(coin)
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'filled' in status:
@@ -1379,6 +1408,7 @@ def cmd_cancel(args):
         result = exchange.cancel(coin, int(oid))
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             print(f"{Colors.GREEN}Order canceled!{Colors.END}")
         else:
             print(f"{Colors.RED}Cancel failed: {result}{Colors.END}")
@@ -1410,6 +1440,7 @@ def cmd_cancel_all(args):
         result = exchange.bulk_cancel(cancel_requests)
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for i, status in enumerate(statuses):
                 coin = cancel_requests[i]['coin'] if i < len(cancel_requests) else '?'
@@ -1469,6 +1500,7 @@ def cmd_modify_order(args):
         )
 
         if result.get('status') == 'ok':
+            _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
             for status in statuses:
                 if 'resting' in status:

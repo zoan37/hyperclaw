@@ -176,6 +176,13 @@ Each CLI invocation cold-starts the SDK and burns ~40 API weight units just to i
 
 The `.env` file includes `HL_PROXY_URL=http://localhost:18731` by default. All read commands will route through the proxy automatically. To disable the proxy (not recommended), comment out or remove `HL_PROXY_URL` from `.env`.
 
+**Restart the proxy** after installing or updating the skill (e.g. `git pull`, dependency changes). The proxy runs in-memory — it won't pick up code or config changes until restarted:
+
+```bash
+# Find and kill existing proxy, then restart
+kill $(lsof -ti:18731) 2>/dev/null; {baseDir}/scripts/.venv/bin/python {baseDir}/scripts/server.py &
+```
+
 **Proxy endpoints:**
 
 | Endpoint | Description |
