@@ -13,6 +13,7 @@ Usage:
     python hyperliquid_tools.py limit-buy BTC 0.01 85000   # Limit buy
     python hyperliquid_tools.py limit-sell BTC 0.01 95000  # Limit sell
     python hyperliquid_tools.py close BTC           # Close position
+    python hyperliquid_tools.py swap 20             # Swap USDC → USDH for HIP-3
     python hyperliquid_tools.py orders              # List open orders
     python hyperliquid_tools.py cancel ORDER_ID     # Cancel order
     python hyperliquid_tools.py cancel-all          # Cancel all orders
@@ -788,6 +789,148 @@ def cmd_leverage(args):
         print(f"{Colors.RED}Error: {e}{Colors.END}")
 
 
+def cmd_transfer(args):
+    """Swap USDC to the collateral token required by a HIP-3 dex."""
+    exchange, info, config = setup_exchange()
+    amount = args.amount
+
+    # Figure out which collateral to swap to/from
+    token_name = getattr(args, 'token', None)
+    spot_pair = None
+
+    if token_name:
+        # User specified the token directly
+        for idx, (name, pair) in _COLLATERAL_SPOT_PAIRS.items():
+            if name.upper() == token_name.upper():
+                spot_pair = pair
+                token_name = name
+                break
+        if not spot_pair:
+            print(f"{Colors.RED}Unknown collateral token: {token_name}")
+            print(f"Known tokens: {', '.join(name for name, _ in _COLLATERAL_SPOT_PAIRS.values())}{Colors.END}")
+            return
+    else:
+        # Default to USDH (most common: km, flx, vntl)
+        token_name = 'USDH'
+        spot_pair = '@230'
+
+    is_sell = args.to_usdc  # sell collateral back to USDC
+    if is_sell:
+        print(f"\n{Colors.BOLD}Swap: {amount:.2f} {token_name} → USDC{Colors.END}")
+    else:
+        print(f"\n{Colors.BOLD}Swap: {amount:.2f} USDC → {token_name}{Colors.END}")
+
+    try:
+        # Show current balances
+        spot_state = info.spot_user_state(config['account_address'])
+        for b in spot_state.get('balances', []):
+            coin = b.get('coin', '')
+            if coin in ('USDC', token_name):
+                total = float(b.get('total', 0))
+                hold = float(b.get('hold', 0))
+                hold_str = f" (hold: {hold:.2f})" if hold > 0.01 else ""
+                print(f"  {coin:<8} {total:.2f}{hold_str}")
+
+        # Execute spot swap
+        # Buy collateral: is_buy=True, size=amount in collateral, price=1.002 (slight premium)
+        # Sell collateral: is_buy=False, size=amount in collateral, price=0.998 (slight discount)
+        if is_sell:
+            result = exchange.order(spot_pair, False, float(amount), 0.998, {'limit': {'tif': 'Ioc'}})
+        else:
+            result = exchange.order(spot_pair, True, float(amount), 1.002, {'limit': {'tif': 'Ioc'}})
+
+        if result.get('status') == 'ok':
+            statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            for status in statuses:
+                if 'filled' in status:
+                    filled = status['filled']
+                    print(f"\n{Colors.GREEN}Swapped {filled.get('totalSz')} {token_name} @ {filled.get('avgPx')}{Colors.END}")
+                elif 'error' in status:
+                    print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+        else:
+            print(f"\n{Colors.RED}Swap failed: {result}{Colors.END}")
+
+        # Show updated balances
+        spot_state = info.spot_user_state(config['account_address'])
+        print(f"\n  After:")
+        for b in spot_state.get('balances', []):
+            coin = b.get('coin', '')
+            if coin in ('USDC', token_name):
+                total = float(b.get('total', 0))
+                hold = float(b.get('hold', 0))
+                hold_str = f" (hold: {hold:.2f})" if hold > 0.01 else ""
+                print(f"    {coin:<8} {total:.2f}{hold_str}")
+
+    except Exception as e:
+        print(f"{Colors.RED}Error: {e}{Colors.END}")
+
+
+# Map of HIP-3 dex collateral token index → (token name, USDC spot pair coin)
+# Built from perp_dex meta collateralToken field + spot pair lookup.
+# Token 0 = USDC (no swap needed).
+_COLLATERAL_SPOT_PAIRS = {
+    360: ('USDH', '@230'),   # km, flx, vntl
+    235: ('USDe', '@150'),   # hyna
+    268: ('USDT0', '@166'),  # cash
+}
+
+
+def _get_dex_collateral(info, dex_name):
+    """Get the collateral token info for a HIP-3 dex.
+
+    Returns (token_index, token_name, spot_pair) or (0, 'USDC', None) if USDC.
+    """
+    try:
+        meta = info.meta(dex=dex_name)
+        token_idx = meta.get('collateralToken', 0)
+        if token_idx == 0:
+            return (0, 'USDC', None)
+        entry = _COLLATERAL_SPOT_PAIRS.get(token_idx)
+        if entry:
+            return (token_idx, entry[0], entry[1])
+        return (token_idx, f'token#{token_idx}', None)
+    except Exception:
+        return (0, 'USDC', None)
+
+
+
+def _handle_margin_error(error_text, coin, info, config):
+    """Show actionable guidance when an order fails with a margin error on HIP-3."""
+    if ':' not in coin:
+        return
+
+    lower = error_text.lower()
+    if 'margin' not in lower and 'insufficient' not in lower:
+        return
+
+    dex = coin.split(':')[0]
+    try:
+        token_idx, token_name, spot_pair = _get_dex_collateral(info, dex)
+        if token_idx == 0:
+            return  # USDC collateral, nothing special to say
+
+        spot_state = info.spot_user_state(config['account_address'])
+        collateral_free = 0
+        usdc_free = 0
+        for b in spot_state.get('balances', []):
+            total = float(b.get('total', 0))
+            hold = float(b.get('hold', 0))
+            if b.get('coin') == token_name:
+                collateral_free = total - hold
+            elif b.get('coin') == 'USDC':
+                usdc_free = total - hold
+
+        print(f"\n{Colors.YELLOW}{dex} dex uses {token_name} as collateral (not USDC).")
+        print(f"  {token_name} balance: {collateral_free:.2f}")
+        print(f"  USDC balance: {format_price(usdc_free)}")
+        if spot_pair:
+            print(f"  Swap USDC first: hyperliquid_tools.py swap <amount> --token {token_name}{Colors.END}")
+        else:
+            print(f"  Swap USDC → {token_name} via the Hyperliquid UI.{Colors.END}")
+    except Exception:
+        pass
+
+
 def cmd_buy(args):
     """Market buy."""
     exchange, info, config = setup_exchange()
@@ -805,9 +948,14 @@ def cmd_buy(args):
                 return
 
         # Get current price for reference
-        all_mids = info.all_mids()
-        if coin in all_mids:
-            current_price = float(all_mids[coin])
+        if ':' in coin:
+            dex = coin.split(':')[0]
+            all_mids = info.all_mids(dex=dex)
+        else:
+            all_mids = info.all_mids()
+        current_price = float(all_mids[coin]) if coin in all_mids else None
+
+        if current_price:
             print(f"Current price: {format_price(current_price)}")
             print(f"Estimated cost: {format_price(current_price * size)}")
 
@@ -825,8 +973,11 @@ def cmd_buy(args):
                     print(f"  OID: {filled.get('oid')}")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    _handle_margin_error(status['error'], coin, info, config)
         else:
+            error_text = str(result)
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            _handle_margin_error(error_text, coin, info, config)
 
     except Exception as e:
         print(f"{Colors.RED}Error executing buy: {e}{Colors.END}")
@@ -849,9 +1000,14 @@ def cmd_sell(args):
                 return
 
         # Get current price for reference
-        all_mids = info.all_mids()
-        if coin in all_mids:
-            current_price = float(all_mids[coin])
+        if ':' in coin:
+            dex = coin.split(':')[0]
+            all_mids = info.all_mids(dex=dex)
+        else:
+            all_mids = info.all_mids()
+        current_price = float(all_mids[coin]) if coin in all_mids else None
+
+        if current_price:
             print(f"Current price: {format_price(current_price)}")
 
         # Execute market sell
@@ -868,8 +1024,11 @@ def cmd_sell(args):
                     print(f"  OID: {filled.get('oid')}")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {status['error']}{Colors.END}")
+                    _handle_margin_error(status['error'], coin, info, config)
         else:
+            error_text = str(result)
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            _handle_margin_error(error_text, coin, info, config)
 
     except Exception as e:
         print(f"{Colors.RED}Error executing sell: {e}{Colors.END}")
@@ -2487,6 +2646,11 @@ def main():
     leverage_parser.add_argument('leverage', type=int, help='Leverage multiplier (e.g., 5 for 5x)')
     leverage_parser.add_argument('--isolated', action='store_true', help='Use isolated margin (default: cross)')
 
+    swap_parser = subparsers.add_parser('swap', help='Swap USDC to HIP-3 dex collateral (USDH, USDe, USDT0)')
+    swap_parser.add_argument('amount', type=float, help='Amount to swap')
+    swap_parser.add_argument('--token', default=None, help='Collateral token (default: USDH). Options: USDH, USDe, USDT0')
+    swap_parser.add_argument('--to-usdc', action='store_true', help='Reverse: sell collateral back to USDC')
+
     buy_parser = subparsers.add_parser('buy', help='Market buy')
     buy_parser.add_argument('coin', help='Asset to buy')
     buy_parser.add_argument('size', type=float, help='Size to buy')
@@ -2587,6 +2751,7 @@ def main():
         'user-funding': cmd_user_funding,
         'portfolio': cmd_portfolio,
         'leverage': cmd_leverage,
+        'swap': cmd_transfer,
         'buy': cmd_buy,
         'sell': cmd_sell,
         'limit-buy': cmd_limit_buy,

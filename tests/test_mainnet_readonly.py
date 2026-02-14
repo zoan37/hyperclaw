@@ -249,6 +249,53 @@ class TestHip3:
 
 
 # ============================================================================
+# HIP-3 COLLATERAL
+# ============================================================================
+
+
+class TestCollateral:
+    """Test that HIP-3 dex collateral detection works for different stablecoins."""
+
+    def test_price_km_asset(self):
+        """km dex asset (USDH collateral) should return a price."""
+        rc, out, err = run_cli("price", "km:US500")
+        assert rc == 0, f"failed: {err or out}"
+        assert "km:US500" in out
+        assert "$" in out
+
+    def test_price_hyna_asset(self):
+        """hyna dex asset (USDe collateral) should return a price."""
+        rc, out, err = run_cli("price", "hyna:BTC")
+        assert rc == 0, f"failed: {err or out}"
+        assert "hyna:BTC" in out
+
+    def test_price_xyz_asset(self):
+        """xyz dex asset (USDC collateral) should return a price."""
+        rc, out, err = run_cli("price", "xyz:TSLA")
+        assert rc == 0, f"failed: {err or out}"
+        assert "xyz:TSLA" in out
+        assert "$" in out
+
+    def test_funding_hip3_multi_dex(self):
+        """funding should work across dexes with different collateral tokens."""
+        rc, out, err = run_cli("funding", "km:US500")
+        assert rc == 0, f"failed: {err or out}"
+        assert "km:US500" in out
+
+    def test_price_cash_asset(self):
+        """cash dex asset (USDT0 collateral) should return a price."""
+        rc, out, err = run_cli("price", "cash:TSLA")
+        assert rc == 0, f"failed: {err or out}"
+        assert "cash:TSLA" in out
+
+    def test_book_hip3_non_usdc(self):
+        """Order book should work for non-USDC collateral dexes."""
+        rc, out, err = run_cli("book", "km:US500")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order Book" in out
+
+
+# ============================================================================
 # SCAN (heavy - many API calls)
 # ============================================================================
 

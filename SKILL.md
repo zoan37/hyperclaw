@@ -61,6 +61,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | `check` | Position health check (book ratio, funding, PnL, leverage, liquidation warnings) | `hyperliquid_tools.py check` or `check --address 0x...` |
 | `user-funding` | Your funding payments received/paid | `hyperliquid_tools.py user-funding --lookback 7d` |
 | `portfolio` | Portfolio performance (PnL, volume by period) | `hyperliquid_tools.py portfolio` |
+| `swap` | Swap USDC ↔ HIP-3 dex collateral (USDH, USDe, USDT0) | `hyperliquid_tools.py swap 20` or `swap 20 --token USDe` or `swap 10 --to-usdc` |
 
 ### Market Data
 
@@ -141,6 +142,27 @@ hyperliquid_tools.py funding xyz:TSLA vntl:SPACEX km:US500
 - Higher fees (2x normal)
 - Thinner order books (wider spreads)
 - Max leverage varies by asset (10x for most equities, 20x for commodities/metals)
+- Some dexes require non-USDC collateral — swap first (see below)
+
+**HIP-3 Collateral:** Some dexes use stablecoin collateral other than USDC (e.g. USDH, USDe, USDT0). You must swap USDC to the required collateral before trading on these dexes. Use `dexes` to check current collateral requirements — they can change.
+
+| Collateral | Swap command |
+|-----------|--------------|
+| USDC | No swap needed |
+| USDH | `swap <amount>` (default) |
+| USDe | `swap <amount> --token USDe` |
+| USDT0 | `swap <amount> --token USDT0` |
+
+To swap collateral back to USDC: `swap <amount> --to-usdc` (or `swap <amount> --token USDe --to-usdc`).
+
+Example workflow for km:US500:
+```bash
+hyperliquid_tools.py swap 20                          # Swap 20 USDC → USDH
+hyperliquid_tools.py leverage km:US500 10 --isolated  # Set leverage
+hyperliquid_tools.py buy km:US500 0.02                # Trade
+hyperliquid_tools.py close km:US500                   # Close when done
+hyperliquid_tools.py swap 20 --to-usdc                # Swap USDH back to USDC
+```
 
 ## Caching Proxy (Default — Start First)
 
@@ -186,6 +208,8 @@ The proxy caches `/info` read responses (metadata 300s, prices 5s, user state 2s
 **Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`, `raw`, `polymarket`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY`.
 
 ## Account Abstraction Modes
+
+**Unified mode is recommended for API wallet trading.** In standard mode, funds are split between spot and perp clearinghouses, and API wallets cannot transfer between them. Unified mode pools all funds into a single balance, so cross-margin perps can access your full balance without manual transfers. HIP-3 dexes that require non-USDC collateral work in both modes — just use the `swap` command to convert USDC to the required collateral.
 
 Hyperliquid accounts operate in one of several modes that affect where balances live. The `status` command auto-detects the mode and shows it as a badge (`[unified]`, `[portfolio margin]`, or `[standard]`).
 
