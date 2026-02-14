@@ -80,7 +80,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | Command | Description | Example |
 |---------|-------------|---------|
 | `analyze [COINS...]` | Comprehensive market analysis (prices, funding, OI, volume, book depth) | `hyperliquid_tools.py analyze BTC ETH SOL` |
-| `scan` | Scan all perps for funding opportunities | `hyperliquid_tools.py scan --top 20 --min-volume 100000` |
+| `scan` | Scan all perps for funding opportunities. `--sort {funding\|volume\|oi\|price-change}` outputs a single flat table sorted by the chosen metric (default: multi-section view). | `hyperliquid_tools.py scan --top 20 --min-volume 100000` or `scan --sort volume --top 10` |
 | `hip3 [COIN]` | HIP-3 perp data (price, spread, funding) | `hyperliquid_tools.py hip3 TSLA` |
 | `hip3` | All HIP-3 dex assets | `hyperliquid_tools.py hip3` |
 | `dexes` | List all HIP-3 dexes and their assets | `hyperliquid_tools.py dexes` |

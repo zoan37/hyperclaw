@@ -314,6 +314,14 @@ class TestScan:
         assert rc == 0, f"failed: {err or out}"
         assert "BY VOLUME" in out
 
+    def test_scan_sorted_by_volume(self):
+        """scan with --sort flag produces flat table."""
+        rc, out, err = run_cli("scan", "--sort", "volume", "--top", "5", timeout=120)
+        assert rc == 0, f"failed: {err or out}"
+        assert "MARKET SCANNER" in out
+        # Sorted mode should NOT show the sectioned headers
+        assert "NEGATIVE FUNDING" not in out
+
 
 # ============================================================================
 # ANALYZE (heavy - many API calls)
