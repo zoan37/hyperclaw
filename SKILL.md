@@ -68,7 +68,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | Command | Description | Example |
 |---------|-------------|---------|
 | `price [COINS...]` | Current prices (supports HIP-3 dex prefix) | `hyperliquid_tools.py price BTC ETH xyz:TSLA` |
-| `funding [COINS...]` | Funding rates (hourly + APR + signal) | `hyperliquid_tools.py funding BTC SOL DOGE` |
+| `funding [COINS...]` | Funding rates (hourly + APR + signal). `--predicted` shows the estimated rate for the next hourly settlement (can still shift as mark/oracle prices move before the hour closes), with Binance/Bybit comparison (APR-normalized across different intervals). Use predicted to preview upcoming charges and confirm a funding edge isn't HL-specific. | `hyperliquid_tools.py funding BTC SOL DOGE` or `funding BTC --predicted` |
 | `book COIN` | L2 order book with spread | `hyperliquid_tools.py book SOL` |
 | `candles COIN` | OHLCV candlestick data with SMA | `hyperliquid_tools.py candles BTC --interval 1h --lookback 7d` |
 | `funding-history COIN` | Historical funding rates with summary | `hyperliquid_tools.py funding-history BTC --lookback 24h` |

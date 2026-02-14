@@ -651,10 +651,86 @@ def cmd_price(args):
         print(f"{Colors.RED}Error fetching prices: {e}{Colors.END}")
 
 
+def _cmd_funding_predicted(config, coins):
+    """Show predicted funding rates with cross-exchange comparison."""
+    import requests
+
+    try:
+        resp = requests.post(
+            config['api_url'] + "/info",
+            json={"type": "predictedFundings"},
+            timeout=10
+        )
+        if resp.status_code != 200:
+            print(f"{Colors.RED}Error fetching predicted funding rates (HTTP {resp.status_code}){Colors.END}")
+            return
+        data = resp.json()
+    except Exception as e:
+        print(f"{Colors.RED}Error fetching predicted funding rates: {e}{Colors.END}")
+        return
+
+    # Build lookup: {coin: {venue_key: {rate, next_time, interval}}}
+    venue_names = {'HlPerp': 'HL', 'BinPerp': 'Bin', 'BybitPerp': 'Bybit'}
+    lookup = {}
+    for entry in data:
+        coin = entry[0]
+        venues = {}
+        for venue_key, info_dict in entry[1]:
+            if info_dict is None:
+                continue
+            short = venue_names.get(venue_key, venue_key)
+            rate = float(info_dict.get('fundingRate', '0'))
+            interval = int(info_dict.get('fundingIntervalHours', 1))
+            next_time = info_dict.get('nextFundingTime')
+            venues[short] = {'rate': rate, 'interval': interval, 'next_time': next_time}
+        lookup[coin] = venues
+
+    now_ms = int(time.time() * 1000)
+
+    print(f"\n{Colors.BOLD}Predicted Funding Rates (next interval):{Colors.END}")
+    print(f"  {'Asset':<12} {'HL APR':>10} {'Bin APR':>10} {'Bybit APR':>10}  {'Next In':>8}")
+    print("  " + "-" * 55)
+
+    for coin in coins:
+        # Strip dex prefix for lookup (HIP-3 coins won't be in predicted data)
+        bare = coin.split(':')[-1] if ':' in coin else coin
+        if bare not in lookup:
+            reason = "HIP-3 only (no cross-exchange data)" if ':' in coin else "Not found"
+            print(f"  {coin:<12} {Colors.DIM}{reason}{Colors.END}")
+            continue
+
+        venues = lookup[bare]
+        cols = []
+        for venue in ['HL', 'Bin', 'Bybit']:
+            if venue in venues:
+                v = venues[venue]
+                apr = v['rate'] / v['interval'] * 24 * 365 * 100
+                cols.append(f"{apr:>9.1f}%")
+            else:
+                cols.append(f"{'—':>10}")
+
+        # Time until next HL funding
+        hl = venues.get('HL')
+        if hl and hl['next_time']:
+            remaining_ms = hl['next_time'] - now_ms
+            if remaining_ms > 0:
+                mins = remaining_ms // 60000
+                next_str = f"{mins}m"
+            else:
+                next_str = "now"
+        else:
+            next_str = "—"
+
+        print(f"  {coin:<12} {cols[0]} {cols[1]} {cols[2]}  {next_str:>8}")
+
+
 def cmd_funding(args):
     """Get funding rates for assets."""
     info, config = setup_info()
     coins = args.coins if args.coins else ['BTC', 'ETH', 'SOL', 'DOGE', 'HYPE']
+
+    if getattr(args, 'predicted', False):
+        return _cmd_funding_predicted(config, coins)
 
     try:
         # Get meta and asset contexts
@@ -2799,6 +2875,7 @@ def main():
 
     funding_parser = subparsers.add_parser('funding', help='Get funding rates')
     funding_parser.add_argument('coins', nargs='*', help='Assets to get funding for')
+    funding_parser.add_argument('--predicted', action='store_true', help='Show predicted rates with cross-exchange comparison')
 
     book_parser = subparsers.add_parser('book', help='Get order book')
     book_parser.add_argument('coin', help='Asset to get order book for')
