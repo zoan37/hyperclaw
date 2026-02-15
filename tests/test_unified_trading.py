@@ -384,6 +384,92 @@ class TestHip3OrderManagement:
 
 
 # ============================================================================
+# HIP-3 TRIGGER ORDERS (real-money integration)
+# ============================================================================
+
+
+class TestHip3TriggerOrders:
+    """Real-money SL/TP integration on HIP-3 using km:US500."""
+
+    coin = "km:US500"
+    size = 0.02
+    sl_oid = None
+    tp_oid = None
+
+    def test_01_prepare_long_position(self):
+        """Swap collateral, set leverage, and open a small long position."""
+        rc, out, err = run_cli("swap", "11")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Swapped" in out or "USDH" in out
+
+        rc, out, err = run_cli("leverage", self.coin, "10", "--isolated")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Leverage updated!" in out
+
+        rc, out, err = run_cli("buy", self.coin, str(self.size))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order filled!" in out
+
+    def test_02_place_stop_loss_long(self):
+        """Place HIP-3 stop-loss and verify side is SELL (close long)."""
+        rc, out, err = run_cli("price", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        current = parse_first_price(out)
+        assert current is not None and current > 0, f"Could not parse price from: {out}"
+
+        sl_price = round(current * 0.90, 2)
+        rc, out, err = run_cli("stop-loss", self.coin, str(self.size), str(sl_price))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Stop-loss placed!" in out, f"stop-loss output: {out}"
+        assert "SELL (close long)" in out, f"wrong trigger side output: {out}"
+
+        TestHip3TriggerOrders.sl_oid = parse_oid(out)
+        assert TestHip3TriggerOrders.sl_oid is not None, f"No OID in output: {out}"
+
+    def test_03_place_take_profit_long(self):
+        """Place HIP-3 take-profit and verify side is SELL (close long)."""
+        rc, out, err = run_cli("price", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        current = parse_first_price(out)
+        assert current is not None and current > 0, f"Could not parse price from: {out}"
+
+        tp_price = round(current * 1.10, 2)
+        rc, out, err = run_cli("take-profit", self.coin, str(self.size), str(tp_price))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Take-profit placed!" in out, f"take-profit output: {out}"
+        assert "SELL (close long)" in out, f"wrong trigger side output: {out}"
+
+        TestHip3TriggerOrders.tp_oid = parse_oid(out)
+        assert TestHip3TriggerOrders.tp_oid is not None, f"No OID in output: {out}"
+
+    def test_04_cancel_trigger_orders(self):
+        """Cancel all triggers and verify they no longer appear in open orders."""
+        assert TestHip3TriggerOrders.sl_oid is not None, "No SL OID from prior test"
+        assert TestHip3TriggerOrders.tp_oid is not None, "No TP OID from prior test"
+
+        rc, out, err = run_cli("cancel-all")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Done!" in out or "No open orders to cancel" in out
+
+        rc, out, err = run_cli("orders")
+        assert rc == 0, f"failed: {err or out}"
+        assert str(TestHip3TriggerOrders.sl_oid) not in out, f"SL OID still open: {TestHip3TriggerOrders.sl_oid}"
+        assert str(TestHip3TriggerOrders.tp_oid) not in out, f"TP OID still open: {TestHip3TriggerOrders.tp_oid}"
+
+    def test_05_close_position(self):
+        """Close the HIP-3 long position."""
+        rc, out, err = run_cli("close", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        assert "Position closed!" in out or "No open position" in out
+
+    def test_06_swap_back_to_usdc(self):
+        """Swap USDH collateral back to USDC."""
+        rc, out, err = run_cli("swap", "11", "--to-usdc")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Swapped" in out or "USDH" in out
+
+
+# ============================================================================
 # MARGIN ERROR GUIDANCE
 # ============================================================================
 
