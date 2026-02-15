@@ -1499,7 +1499,8 @@ def cmd_cancel(args):
 
     # Need to find the coin for this order
     try:
-        open_orders = info.open_orders(config['account_address'])
+        # Search across native + all HIP-3 dexes
+        open_orders = _get_all_open_orders(info, config['account_address'])
 
         order = None
         for o in open_orders:
@@ -1533,18 +1534,30 @@ def cmd_cancel_all(args):
     print(f"\n{Colors.BOLD}Canceling all open orders{Colors.END}")
 
     try:
-        open_orders = info.open_orders(config['account_address'])
+        # Collect open orders across native + all HIP-3 dexes
+        open_orders = _get_all_open_orders(info, config['account_address'])
 
-        if not open_orders:
+        cancel_requests = []
+        seen = set()
+        for order in open_orders:
+            coin = order.get('coin')
+            oid = order.get('oid')
+            if not coin or oid is None:
+                continue
+            key = (coin, str(oid))
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                cancel_requests.append({"coin": coin, "oid": int(oid)})
+            except (TypeError, ValueError):
+                continue
+
+        if not cancel_requests:
             print(f"{Colors.DIM}No open orders to cancel{Colors.END}")
             return
 
-        print(f"Found {len(open_orders)} open orders")
-
-        cancel_requests = [
-            {"coin": order.get('coin'), "oid": int(order.get('oid'))}
-            for order in open_orders
-        ]
+        print(f"Found {len(cancel_requests)} open orders")
 
         result = exchange.bulk_cancel(cancel_requests)
 
@@ -1577,11 +1590,11 @@ def cmd_modify_order(args):
 
     try:
         # Find the existing order to get coin and side
-        open_orders = info.frontend_open_orders(config['account_address'])
+        open_orders = _get_all_open_orders(info, config['account_address'])
 
         order = None
         for o in open_orders:
-            if o.get('oid') == oid:
+            if str(o.get('oid')) == str(oid):
                 order = o
                 break
 

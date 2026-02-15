@@ -59,6 +59,18 @@ def run_cli(*args, timeout=30):
     return result.returncode, result.stdout, result.stderr
 
 
+def parse_oid(output):
+    """Extract OID from CLI output."""
+    match = re.search(r"OID:\s*(\d+)", output)
+    return int(match.group(1)) if match else None
+
+
+def parse_first_price(output):
+    """Extract first $price from CLI output."""
+    match = re.search(r"\$\s*([\d,]+(?:\.\d+)?)", output)
+    return float(match.group(1).replace(",", "")) if match else None
+
+
 # ============================================================================
 # FIXTURES
 # ============================================================================
@@ -261,6 +273,114 @@ class TestCashUSDT0:
         rc, out, err = run_cli("swap", "11", "--token", "USDT0", "--to-usdc")
         assert rc == 0, f"failed: {err or out}"
         assert "USDT0" in out
+
+
+# ============================================================================
+# HIP-3 ORDER MANAGEMENT (limit/modify/cancel/cancel-all)
+# ============================================================================
+
+
+class TestHip3OrderManagement:
+    """HIP-3 order-management flow on unified wallet using km:US500 (USDH collateral)."""
+
+    coin = "km:US500"
+    oid = None
+    oid_for_cancel_all = None
+
+    def _place_resting_limit_sell(self):
+        rc, out, err = run_cli("price", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        current = parse_first_price(out)
+        assert current is not None, f"Could not parse price from: {out}"
+        assert current > 0
+
+        # Reuse known-valid size from existing unified km:US500 tests.
+        size = 0.02
+        limit_price = round(current * 1.10, 2)
+        rc, out, err = run_cli("limit-sell", self.coin, str(size), str(limit_price))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order placed!" in out, f"Expected resting order, got: {out}"
+        oid = parse_oid(out)
+        assert oid is not None, f"No OID in output: {out}"
+        return oid
+
+    def test_00_prepare_km_collateral(self):
+        """Ensure USDH collateral and leverage are set before placing km orders."""
+        rc, out, err = run_cli("swap", "11")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Swapped" in out or "USDH" in out
+
+        rc, out, err = run_cli("leverage", self.coin, "10", "--isolated")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Leverage updated!" in out
+
+    def test_01_place_hip3_limit_order(self):
+        """Place a resting HIP-3 limit order."""
+        TestHip3OrderManagement.oid = self._place_resting_limit_sell()
+
+        # Sanity check: HIP-3 order is visible in the all-dex orders view.
+        rc, out, err = run_cli("orders")
+        assert rc == 0, f"failed: {err or out}"
+        assert str(TestHip3OrderManagement.oid) in out, (
+            f"HIP-3 OID should appear in orders output: {TestHip3OrderManagement.oid}"
+        )
+
+    def test_02_modify_hip3_limit_order(self):
+        """Modify the resting HIP-3 order."""
+        assert TestHip3OrderManagement.oid is not None, "No OID from prior test"
+
+        rc, out, err = run_cli("price", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        current = parse_first_price(out)
+        assert current is not None and current > 0
+
+        # Move price further away so it remains resting.
+        new_price = round(current * 1.15, 2)
+        rc, out, err = run_cli("modify-order", str(TestHip3OrderManagement.oid), str(new_price))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order modified!" in out, f"modify-order failed output: {out}"
+
+        new_oid = parse_oid(out)
+        if new_oid is not None:
+            TestHip3OrderManagement.oid = new_oid
+
+    def test_03_cancel_hip3_limit_order(self):
+        """Cancel the HIP-3 order by OID."""
+        assert TestHip3OrderManagement.oid is not None, "No OID from prior tests"
+
+        rc, out, err = run_cli("cancel", str(TestHip3OrderManagement.oid))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order canceled!" in out, f"cancel failed output: {out}"
+
+        rc, out, err = run_cli("orders")
+        assert rc == 0, f"failed: {err or out}"
+        assert str(TestHip3OrderManagement.oid) not in out, (
+            f"Canceled OID still appears in orders output: {TestHip3OrderManagement.oid}"
+        )
+
+    def test_04_place_second_hip3_limit_order(self):
+        """Place another HIP-3 order to validate cancel-all behavior."""
+        TestHip3OrderManagement.oid_for_cancel_all = self._place_resting_limit_sell()
+
+    def test_05_cancel_all_cancels_hip3_orders(self):
+        """cancel-all should also cancel HIP-3 resting orders."""
+        assert TestHip3OrderManagement.oid_for_cancel_all is not None, "No OID from prior test"
+
+        rc, cancel_out, err = run_cli("cancel-all")
+        assert rc == 0, f"failed: {err or cancel_out}"
+
+        rc, out, err = run_cli("orders")
+        assert rc == 0, f"failed: {err or out}"
+        assert str(TestHip3OrderManagement.oid_for_cancel_all) not in out, (
+            f"HIP-3 OID still appears after cancel-all: {TestHip3OrderManagement.oid_for_cancel_all}. "
+            f"cancel-all output was: {cancel_out}"
+        )
+
+    def test_06_swap_back_to_usdc(self):
+        """Swap USDH collateral back to USDC after order-management tests."""
+        rc, out, err = run_cli("swap", "11", "--to-usdc")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Swapped" in out or "USDH" in out
 
 
 # ============================================================================
