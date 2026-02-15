@@ -63,7 +63,7 @@ def get_config(require_credentials: bool = True):
     """Get Hyperliquid configuration from environment."""
     account_address = os.getenv('HL_ACCOUNT_ADDRESS')
     secret_key = os.getenv('HL_SECRET_KEY')
-    use_testnet = os.getenv('HL_TESTNET', 'true').lower() == 'true'
+    use_testnet = os.getenv('HL_TESTNET', 'false').lower() == 'true'
 
     if require_credentials and (not account_address or not secret_key):
         print(f"{Colors.RED}Error: Hyperliquid credentials not configured.{Colors.END}")

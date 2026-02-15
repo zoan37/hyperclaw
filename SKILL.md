@@ -27,12 +27,10 @@ Then configure `.env` in the skill root directory with your Hyperliquid API cred
 ```
 HL_ACCOUNT_ADDRESS=0x_your_wallet_address
 HL_SECRET_KEY=0x_your_api_wallet_private_key
-HL_TESTNET=true
+HL_TESTNET=false
 ```
 
 Get API keys from: https://app.hyperliquid.xyz/API — use a separate API wallet, not your main wallet private key.
-
-**OpenClaw users:** To persist credentials across skill reinstalls/updates from ClawHub, you can set `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY` in `~/.openclaw/.env` (global) instead of the skill-local `.env`. OpenClaw injects global env vars into the process before the skill runs, so they'll be picked up automatically. See [OpenClaw environment docs](https://docs.openclaw.ai/help/environment) for details.
 
 Optional for intelligence commands (sentiment, unlocks, devcheck):
 ```
@@ -212,7 +210,7 @@ The proxy caches `/info` read responses (metadata 300s, prices 5s, user state 2s
 |----------|----------|-------------|
 | `HL_ACCOUNT_ADDRESS` | For trading/status | Hyperliquid wallet address |
 | `HL_SECRET_KEY` | For trading | API wallet private key |
-| `HL_TESTNET` | No | `true` for testnet (default), `false` for mainnet |
+| `HL_TESTNET` | No | `false` for mainnet (default), `true` for testnet |
 | `HL_PROXY_URL` | Recommended | Caching proxy URL (default: `http://localhost:18731`) |
 | `HL_ENV_FILE` | No | Override `.env` file path. When set, loads env vars from this file instead of default `.env` discovery. Useful for wrapper scripts that route to hyperclaw from other projects. |
 | `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck |
