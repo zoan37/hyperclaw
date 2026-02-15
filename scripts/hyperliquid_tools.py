@@ -1324,6 +1324,59 @@ def cmd_limit_sell(args):
         print(f"{Colors.RED}Error placing limit sell: {e}{Colors.END}")
 
 
+def _get_position_for_coin(info, address, coin):
+    """Return the open position dict for a specific coin, or None if not found."""
+    dex = coin.split(':', 1)[0] if ':' in coin else ''
+    try:
+        state = info.user_state(address, dex=dex) if dex else info.user_state(address)
+    except Exception:
+        return None
+
+    for pos in state.get('assetPositions', []):
+        p = pos.get('position', {})
+        if p.get('coin') != coin:
+            continue
+        try:
+            if float(p.get('szi', 0)) != 0:
+                return p
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _get_mid_price_for_coin(info, coin):
+    """Get current mid price for native or HIP-3 coin."""
+    try:
+        if ':' in coin:
+            dex = coin.split(':', 1)[0]
+            mids = info.all_mids(dex=dex)
+        else:
+            mids = info.all_mids()
+        px = mids.get(coin)
+        return float(px) if px is not None else None
+    except Exception:
+        return None
+
+
+def _validate_trigger_side(trigger_type: str, position_size: float, trigger_price: float, current_price: Optional[float]) -> str | None:
+    """Validate trigger is on the correct side of current price for the position."""
+    if current_price is None:
+        return None  # Best effort only if mid price is unavailable
+
+    is_long = position_size > 0
+    if trigger_type == 'sl':
+        if is_long and trigger_price >= current_price:
+            return "For LONG stop-loss, trigger must be below current price."
+        if not is_long and trigger_price <= current_price:
+            return "For SHORT stop-loss, trigger must be above current price."
+    elif trigger_type == 'tp':
+        if is_long and trigger_price <= current_price:
+            return "For LONG take-profit, trigger must be above current price."
+        if not is_long and trigger_price >= current_price:
+            return "For SHORT take-profit, trigger must be below current price."
+    return None
+
+
 def cmd_stop_loss(args):
     """Place a stop-loss trigger order. Closes position at market when trigger price is hit."""
     exchange, info, config = setup_exchange()
@@ -1336,16 +1389,34 @@ def cmd_stop_loss(args):
         print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
 
     try:
-        # Get current price for reference
-        all_mids = info.all_mids()
-        if coin in all_mids:
-            current_price = float(all_mids[coin])
+        position = _get_position_for_coin(info, config['account_address'], coin)
+        if not position:
+            print(f"{Colors.RED}Error: No open position for {coin}{Colors.END}")
+            return
+
+        position_size = float(position.get('szi', 0))
+        max_close_size = abs(position_size)
+        if size <= 0:
+            print(f"{Colors.RED}Error: Size must be greater than 0{Colors.END}")
+            return
+        if size > max_close_size:
+            print(f"{Colors.RED}Error: Size {size} exceeds open position size {max_close_size:.4f}{Colors.END}")
+            return
+
+        # Closing side is defined by position direction, not trigger relative price.
+        is_buy = position_size < 0
+        side_label = "SHORT" if position_size < 0 else "LONG"
+        print(f"Position: {side_label} {max_close_size:.4f}")
+
+        current_price = _get_mid_price_for_coin(info, coin)
+        if current_price:
             diff_pct = ((trigger_price - current_price) / current_price) * 100
             print(f"Current price: {format_price(current_price)} ({diff_pct:+.2f}% from trigger)")
 
-        # Determine direction: if trigger is below current price, it's a sell stop (closing a long)
-        # If trigger is above current price, it's a buy stop (closing a short)
-        is_buy = trigger_price > current_price if coin in all_mids else not args.buy
+        validation_error = _validate_trigger_side('sl', position_size, trigger_price, current_price)
+        if validation_error:
+            print(f"{Colors.RED}Error: {validation_error}{Colors.END}")
+            return
 
         order_type = {
             "trigger": {
@@ -1390,16 +1461,34 @@ def cmd_take_profit(args):
         print(f"{Colors.YELLOW}[TESTNET]{Colors.END}")
 
     try:
-        # Get current price for reference
-        all_mids = info.all_mids()
-        if coin in all_mids:
-            current_price = float(all_mids[coin])
+        position = _get_position_for_coin(info, config['account_address'], coin)
+        if not position:
+            print(f"{Colors.RED}Error: No open position for {coin}{Colors.END}")
+            return
+
+        position_size = float(position.get('szi', 0))
+        max_close_size = abs(position_size)
+        if size <= 0:
+            print(f"{Colors.RED}Error: Size must be greater than 0{Colors.END}")
+            return
+        if size > max_close_size:
+            print(f"{Colors.RED}Error: Size {size} exceeds open position size {max_close_size:.4f}{Colors.END}")
+            return
+
+        # Closing side is defined by position direction, not trigger relative price.
+        is_buy = position_size < 0
+        side_label = "SHORT" if position_size < 0 else "LONG"
+        print(f"Position: {side_label} {max_close_size:.4f}")
+
+        current_price = _get_mid_price_for_coin(info, coin)
+        if current_price:
             diff_pct = ((trigger_price - current_price) / current_price) * 100
             print(f"Current price: {format_price(current_price)} ({diff_pct:+.2f}% from trigger)")
 
-        # For take-profit: if trigger is above current price, it's a sell (closing a long)
-        # If trigger is below current price, it's a buy (closing a short)
-        is_buy = trigger_price < current_price if coin in all_mids else args.buy
+        validation_error = _validate_trigger_side('tp', position_size, trigger_price, current_price)
+        if validation_error:
+            print(f"{Colors.RED}Error: {validation_error}{Colors.END}")
+            return
 
         order_type = {
             "trigger": {
@@ -1499,7 +1588,8 @@ def cmd_cancel(args):
 
     # Need to find the coin for this order
     try:
-        open_orders = info.open_orders(config['account_address'])
+        # Search across native + all HIP-3 dexes
+        open_orders = _get_all_open_orders(info, config['account_address'])
 
         order = None
         for o in open_orders:
@@ -1533,18 +1623,30 @@ def cmd_cancel_all(args):
     print(f"\n{Colors.BOLD}Canceling all open orders{Colors.END}")
 
     try:
-        open_orders = info.open_orders(config['account_address'])
+        # Collect open orders across native + all HIP-3 dexes
+        open_orders = _get_all_open_orders(info, config['account_address'])
 
-        if not open_orders:
+        cancel_requests = []
+        seen = set()
+        for order in open_orders:
+            coin = order.get('coin')
+            oid = order.get('oid')
+            if not coin or oid is None:
+                continue
+            key = (coin, str(oid))
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                cancel_requests.append({"coin": coin, "oid": int(oid)})
+            except (TypeError, ValueError):
+                continue
+
+        if not cancel_requests:
             print(f"{Colors.DIM}No open orders to cancel{Colors.END}")
             return
 
-        print(f"Found {len(open_orders)} open orders")
-
-        cancel_requests = [
-            {"coin": order.get('coin'), "oid": int(order.get('oid'))}
-            for order in open_orders
-        ]
+        print(f"Found {len(cancel_requests)} open orders")
 
         result = exchange.bulk_cancel(cancel_requests)
 
@@ -1577,11 +1679,11 @@ def cmd_modify_order(args):
 
     try:
         # Find the existing order to get coin and side
-        open_orders = info.frontend_open_orders(config['account_address'])
+        open_orders = _get_all_open_orders(info, config['account_address'])
 
         order = None
         for o in open_orders:
-            if o.get('oid') == oid:
+            if str(o.get('oid')) == str(oid):
                 order = o
                 break
 

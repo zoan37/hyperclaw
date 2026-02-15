@@ -59,6 +59,18 @@ def run_cli(*args, timeout=30):
     return result.returncode, result.stdout, result.stderr
 
 
+def parse_oid(output):
+    """Extract OID from CLI output."""
+    match = re.search(r"OID:\s*(\d+)", output)
+    return int(match.group(1)) if match else None
+
+
+def parse_first_price(output):
+    """Extract first $price from CLI output."""
+    match = re.search(r"\$\s*([\d,]+(?:\.\d+)?)", output)
+    return float(match.group(1).replace(",", "")) if match else None
+
+
 # ============================================================================
 # FIXTURES
 # ============================================================================
@@ -261,6 +273,200 @@ class TestCashUSDT0:
         rc, out, err = run_cli("swap", "11", "--token", "USDT0", "--to-usdc")
         assert rc == 0, f"failed: {err or out}"
         assert "USDT0" in out
+
+
+# ============================================================================
+# HIP-3 ORDER MANAGEMENT (limit/modify/cancel/cancel-all)
+# ============================================================================
+
+
+class TestHip3OrderManagement:
+    """HIP-3 order-management flow on unified wallet using km:US500 (USDH collateral)."""
+
+    coin = "km:US500"
+    oid = None
+    oid_for_cancel_all = None
+
+    def _place_resting_limit_sell(self):
+        rc, out, err = run_cli("price", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        current = parse_first_price(out)
+        assert current is not None, f"Could not parse price from: {out}"
+        assert current > 0
+
+        # Reuse known-valid size from existing unified km:US500 tests.
+        size = 0.02
+        limit_price = round(current * 1.10, 2)
+        rc, out, err = run_cli("limit-sell", self.coin, str(size), str(limit_price))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order placed!" in out, f"Expected resting order, got: {out}"
+        oid = parse_oid(out)
+        assert oid is not None, f"No OID in output: {out}"
+        return oid
+
+    def test_00_prepare_km_collateral(self):
+        """Ensure USDH collateral and leverage are set before placing km orders."""
+        rc, out, err = run_cli("swap", "11")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Swapped" in out or "USDH" in out
+
+        rc, out, err = run_cli("leverage", self.coin, "10", "--isolated")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Leverage updated!" in out
+
+    def test_01_place_hip3_limit_order(self):
+        """Place a resting HIP-3 limit order."""
+        TestHip3OrderManagement.oid = self._place_resting_limit_sell()
+
+        # Sanity check: HIP-3 order is visible in the all-dex orders view.
+        rc, out, err = run_cli("orders")
+        assert rc == 0, f"failed: {err or out}"
+        assert str(TestHip3OrderManagement.oid) in out, (
+            f"HIP-3 OID should appear in orders output: {TestHip3OrderManagement.oid}"
+        )
+
+    def test_02_modify_hip3_limit_order(self):
+        """Modify the resting HIP-3 order."""
+        assert TestHip3OrderManagement.oid is not None, "No OID from prior test"
+
+        rc, out, err = run_cli("price", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        current = parse_first_price(out)
+        assert current is not None and current > 0
+
+        # Move price further away so it remains resting.
+        new_price = round(current * 1.15, 2)
+        rc, out, err = run_cli("modify-order", str(TestHip3OrderManagement.oid), str(new_price))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order modified!" in out, f"modify-order failed output: {out}"
+
+        new_oid = parse_oid(out)
+        if new_oid is not None:
+            TestHip3OrderManagement.oid = new_oid
+
+    def test_03_cancel_hip3_limit_order(self):
+        """Cancel the HIP-3 order by OID."""
+        assert TestHip3OrderManagement.oid is not None, "No OID from prior tests"
+
+        rc, out, err = run_cli("cancel", str(TestHip3OrderManagement.oid))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order canceled!" in out, f"cancel failed output: {out}"
+
+        rc, out, err = run_cli("orders")
+        assert rc == 0, f"failed: {err or out}"
+        assert str(TestHip3OrderManagement.oid) not in out, (
+            f"Canceled OID still appears in orders output: {TestHip3OrderManagement.oid}"
+        )
+
+    def test_04_place_second_hip3_limit_order(self):
+        """Place another HIP-3 order to validate cancel-all behavior."""
+        TestHip3OrderManagement.oid_for_cancel_all = self._place_resting_limit_sell()
+
+    def test_05_cancel_all_cancels_hip3_orders(self):
+        """cancel-all should also cancel HIP-3 resting orders."""
+        assert TestHip3OrderManagement.oid_for_cancel_all is not None, "No OID from prior test"
+
+        rc, cancel_out, err = run_cli("cancel-all")
+        assert rc == 0, f"failed: {err or cancel_out}"
+
+        rc, out, err = run_cli("orders")
+        assert rc == 0, f"failed: {err or out}"
+        assert str(TestHip3OrderManagement.oid_for_cancel_all) not in out, (
+            f"HIP-3 OID still appears after cancel-all: {TestHip3OrderManagement.oid_for_cancel_all}. "
+            f"cancel-all output was: {cancel_out}"
+        )
+
+    def test_06_swap_back_to_usdc(self):
+        """Swap USDH collateral back to USDC after order-management tests."""
+        rc, out, err = run_cli("swap", "11", "--to-usdc")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Swapped" in out or "USDH" in out
+
+
+# ============================================================================
+# HIP-3 TRIGGER ORDERS (real-money integration)
+# ============================================================================
+
+
+class TestHip3TriggerOrders:
+    """Real-money SL/TP integration on HIP-3 using km:US500."""
+
+    coin = "km:US500"
+    size = 0.02
+    sl_oid = None
+    tp_oid = None
+
+    def test_01_prepare_long_position(self):
+        """Swap collateral, set leverage, and open a small long position."""
+        rc, out, err = run_cli("swap", "11")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Swapped" in out or "USDH" in out
+
+        rc, out, err = run_cli("leverage", self.coin, "10", "--isolated")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Leverage updated!" in out
+
+        rc, out, err = run_cli("buy", self.coin, str(self.size))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Order filled!" in out
+
+    def test_02_place_stop_loss_long(self):
+        """Place HIP-3 stop-loss and verify side is SELL (close long)."""
+        rc, out, err = run_cli("price", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        current = parse_first_price(out)
+        assert current is not None and current > 0, f"Could not parse price from: {out}"
+
+        sl_price = round(current * 0.90, 2)
+        rc, out, err = run_cli("stop-loss", self.coin, str(self.size), str(sl_price))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Stop-loss placed!" in out, f"stop-loss output: {out}"
+        assert "SELL (close long)" in out, f"wrong trigger side output: {out}"
+
+        TestHip3TriggerOrders.sl_oid = parse_oid(out)
+        assert TestHip3TriggerOrders.sl_oid is not None, f"No OID in output: {out}"
+
+    def test_03_place_take_profit_long(self):
+        """Place HIP-3 take-profit and verify side is SELL (close long)."""
+        rc, out, err = run_cli("price", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        current = parse_first_price(out)
+        assert current is not None and current > 0, f"Could not parse price from: {out}"
+
+        tp_price = round(current * 1.10, 2)
+        rc, out, err = run_cli("take-profit", self.coin, str(self.size), str(tp_price))
+        assert rc == 0, f"failed: {err or out}"
+        assert "Take-profit placed!" in out, f"take-profit output: {out}"
+        assert "SELL (close long)" in out, f"wrong trigger side output: {out}"
+
+        TestHip3TriggerOrders.tp_oid = parse_oid(out)
+        assert TestHip3TriggerOrders.tp_oid is not None, f"No OID in output: {out}"
+
+    def test_04_cancel_trigger_orders(self):
+        """Cancel all triggers and verify they no longer appear in open orders."""
+        assert TestHip3TriggerOrders.sl_oid is not None, "No SL OID from prior test"
+        assert TestHip3TriggerOrders.tp_oid is not None, "No TP OID from prior test"
+
+        rc, out, err = run_cli("cancel-all")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Done!" in out or "No open orders to cancel" in out
+
+        rc, out, err = run_cli("orders")
+        assert rc == 0, f"failed: {err or out}"
+        assert str(TestHip3TriggerOrders.sl_oid) not in out, f"SL OID still open: {TestHip3TriggerOrders.sl_oid}"
+        assert str(TestHip3TriggerOrders.tp_oid) not in out, f"TP OID still open: {TestHip3TriggerOrders.tp_oid}"
+
+    def test_05_close_position(self):
+        """Close the HIP-3 long position."""
+        rc, out, err = run_cli("close", self.coin)
+        assert rc == 0, f"failed: {err or out}"
+        assert "Position closed!" in out or "No open position" in out
+
+    def test_06_swap_back_to_usdc(self):
+        """Swap USDH collateral back to USDC."""
+        rc, out, err = run_cli("swap", "11", "--to-usdc")
+        assert rc == 0, f"failed: {err or out}"
+        assert "Swapped" in out or "USDH" in out
 
 
 # ============================================================================
