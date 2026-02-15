@@ -32,6 +32,8 @@ HL_TESTNET=true
 
 Get API keys from: https://app.hyperliquid.xyz/API — use a separate API wallet, not your main wallet private key.
 
+**OpenClaw users:** To persist credentials across skill reinstalls/updates from ClawHub, you can set `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY` in `~/.openclaw/.env` (global) instead of the skill-local `.env`. OpenClaw injects global env vars into the process before the skill runs, so they'll be picked up automatically. See [OpenClaw environment docs](https://docs.openclaw.ai/help/environment) for details.
+
 Optional for intelligence commands (sentiment, unlocks, devcheck):
 ```
 XAI_API_KEY=xai-...
