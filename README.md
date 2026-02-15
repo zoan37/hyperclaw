@@ -2,6 +2,8 @@
 
 An [AgentSkills](https://agentskills.io)-compatible skill for trading perpetual futures on [Hyperliquid](https://hyperliquid.xyz). Works with Claude Code, OpenClaw, and any agent that supports the AgentSkills standard.
 
+**[View on ClawHub](https://clawhub.ai/zoan37/hyperclaw)**
+
 Supports 229+ native crypto perps, HIP-3 builder-deployed perps (equities like TSLA, commodities like GOLD), market intelligence, and a caching proxy to prevent rate limiting.
 
 ## Quick Start
