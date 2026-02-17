@@ -200,3 +200,20 @@ def test_hip3_trigger_uses_dex_price_lookup(monkeypatch, capsys):
     )
     assert len(exchange.order_calls) == 1
     assert info.mid_calls == ["km"]
+
+
+def test_close_no_open_position_is_idempotent_success(monkeypatch, capsys):
+    info = FakeInfo(positions_by_dex={"": []}, mids_by_dex={"": {}})
+    config = {"account_address": "0xabc", "is_testnet": False}
+
+    class NoopExchange:
+        pass
+
+    monkeypatch.setattr(tools, "setup_exchange", lambda **_kwargs: (NoopExchange(), info, config))
+
+    args = SimpleNamespace(coin="SOL")
+    rc = tools.cmd_close(args)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "No open position for SOL" in out

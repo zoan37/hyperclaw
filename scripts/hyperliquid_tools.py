@@ -1605,7 +1605,7 @@ def cmd_close(args):
 
         if not position or float(position['szi']) == 0:
             print(f"{Colors.YELLOW}No open position for {coin}{Colors.END}")
-            return 1
+            return 0
 
         size = float(position['szi'])
         entry_px = float(position['entryPx'])
