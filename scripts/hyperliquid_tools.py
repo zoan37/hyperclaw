@@ -392,8 +392,10 @@ def cmd_status(args):
         else:
             print(f"\n{Colors.DIM}No open positions{Colors.END}")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching account status: {e}{Colors.END}")
+        return 1
 
 
 def cmd_positions(args):
@@ -409,7 +411,7 @@ def cmd_positions(args):
 
         if not open_positions:
             print(f"\n{Colors.DIM}No open positions{Colors.END}")
-            return
+            return 0
 
         for pos in open_positions:
             p = pos['position']
@@ -437,8 +439,10 @@ def cmd_positions(args):
             if liq_px:
                 print(f"  Liquidation:    {format_price(liq_px)}")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching positions: {e}{Colors.END}")
+        return 1
 
 
 def cmd_check(args):
@@ -449,7 +453,7 @@ def cmd_check(args):
     address = args.address if hasattr(args, 'address') and args.address else config.get('account_address', '')
     if not address:
         print(f"{Colors.RED}Error: No account address. Set HL_ACCOUNT_ADDRESS or use --address.{Colors.END}")
-        return
+        return 1
 
     print(f"\n{Colors.BOLD}{Colors.CYAN}POSITION HEALTH CHECK{Colors.END}")
     if config['is_testnet']:
@@ -464,7 +468,7 @@ def cmd_check(args):
 
         if not open_positions:
             print(f"\n{Colors.DIM}No open positions{Colors.END}")
-            return
+            return 0
 
         print(f"\n  Portfolio Value: {format_price(summary['portfolio_value'])} {summary['mode_label']} | Withdrawable: {format_price(summary['withdrawable'])}")
         print()
@@ -612,8 +616,10 @@ def cmd_check(args):
 
             print()
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return 1
 
 
 def cmd_price(args):
@@ -647,8 +653,10 @@ def cmd_price(args):
             else:
                 print(f"  {coin:<20} {Colors.DIM}Not found{Colors.END}")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching prices: {e}{Colors.END}")
+        return 1
 
 
 def _cmd_funding_predicted(config, coins):
@@ -663,11 +671,11 @@ def _cmd_funding_predicted(config, coins):
         )
         if resp.status_code != 200:
             print(f"{Colors.RED}Error fetching predicted funding rates (HTTP {resp.status_code}){Colors.END}")
-            return
+            return 1
         data = resp.json()
     except Exception as e:
         print(f"{Colors.RED}Error fetching predicted funding rates: {e}{Colors.END}")
-        return
+        return 1
 
     # Build lookup: {coin: {venue_key: {rate, next_time, interval}}}
     venue_names = {'HlPerp': 'HL', 'BinPerp': 'Bin', 'BybitPerp': 'Bybit'}
@@ -722,6 +730,8 @@ def _cmd_funding_predicted(config, coins):
             next_str = "—"
 
         print(f"  {coin:<12} {cols[0]} {cols[1]} {cols[2]}  {next_str:>8}")
+
+    return 0
 
 
 def cmd_funding(args):
@@ -803,8 +813,10 @@ def cmd_funding(args):
                 if not found:
                     print(f"  {coin:<12} {Colors.DIM}Not found{Colors.END}")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching funding rates: {e}{Colors.END}")
+        return 1
 
 
 def cmd_book(args):
@@ -838,8 +850,10 @@ def cmd_book(args):
             spread_pct = (spread / mid) * 100
             print(f"\n  Mid: {format_price(mid)} | Spread: {format_price(spread)} ({spread_pct:.3f}%)")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching order book: {e}{Colors.END}")
+        return 1
 
 
 def cmd_orders(args):
@@ -853,7 +867,7 @@ def cmd_orders(args):
 
         if not open_orders:
             print(f"  {Colors.DIM}No open orders{Colors.END}")
-            return
+            return 0
 
         print(f"  {'OID':<12} {'Asset':<12} {'Side':<6} {'Size':>12} {'Price':>12} {'Type':<12} {'Details'}")
         print("  " + "-" * 85)
@@ -884,8 +898,10 @@ def cmd_orders(args):
 
             print(f"  {oid:<12} {coin:<12} {side_color}{side:<6}{Colors.END} {sz:>12} {format_price(px):>12} {order_type:<12} {detail_str}")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching orders: {e}{Colors.END}")
+        return 1
 
 
 # ============================================================================
@@ -943,7 +959,7 @@ def cmd_leverage(args):
 
     if max_lev and leverage > max_lev:
         print(f"{Colors.RED}Error: {leverage}x exceeds max leverage of {max_lev}x for {coin}{Colors.END}")
-        return
+        return 1
 
     try:
         result = exchange.update_leverage(leverage, coin, is_cross)
@@ -951,10 +967,13 @@ def cmd_leverage(args):
             _invalidate_proxy_cache(config)
             print(f"{Colors.GREEN}Leverage updated!{Colors.END}")
             print(f"  {coin}: {leverage}x {margin_type}")
+            return 0
         else:
             print(f"{Colors.RED}Failed: {result}{Colors.END}")
+            return 1
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return 1
 
 
 def cmd_transfer(args):
@@ -976,7 +995,7 @@ def cmd_transfer(args):
         if not spot_pair:
             print(f"{Colors.RED}Unknown collateral token: {token_name}")
             print(f"Known tokens: {', '.join(name for name, _p, _s in _COLLATERAL_SPOT_PAIRS.values())}{Colors.END}")
-            return
+            return 1
     else:
         # Default to USDH (most common: km, flx, vntl)
         token_name = 'USDH'
@@ -989,6 +1008,8 @@ def cmd_transfer(args):
         print(f"\n{Colors.BOLD}Swap: {amount:.2f} USDC → {token_name}{Colors.END}")
 
     try:
+        had_error = False
+
         # Show current balances
         spot_state = info.spot_user_state(config['account_address'])
         for b in spot_state.get('balances', []):
@@ -1016,8 +1037,10 @@ def cmd_transfer(args):
                     print(f"\n{Colors.GREEN}Swapped {filled.get('totalSz')} {token_name} @ {filled.get('avgPx')}{Colors.END}")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
+                    had_error = True
         else:
             print(f"\n{Colors.RED}Swap failed: {result}{Colors.END}")
+            had_error = True
 
         # Show updated balances
         spot_state = info.spot_user_state(config['account_address'])
@@ -1030,8 +1053,10 @@ def cmd_transfer(args):
                 hold_str = f" (hold: {hold:.2f})" if hold > 0.01 else ""
                 print(f"    {coin:<8} {total:.2f}{hold_str}")
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return 1
 
 
 # Map of HIP-3 dex collateral token index → (token name, USDC spot pair coin, slippage)
@@ -1147,7 +1172,7 @@ def cmd_buy(args):
         # Set leverage if specified
         if args.leverage:
             if not _set_leverage(exchange, coin, args.leverage, not getattr(args, 'isolated', False)):
-                return
+                return 1
 
         # Get current price for reference
         if ':' in coin:
@@ -1164,6 +1189,7 @@ def cmd_buy(args):
         # Execute market buy
         result = exchange.market_open(coin, True, size, None, 0.01)  # 1% slippage
 
+        had_error = False
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
@@ -1177,13 +1203,17 @@ def cmd_buy(args):
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
                     _handle_margin_error(status['error'], coin, info, config)
+                    had_error = True
         else:
             error_text = str(result)
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
             _handle_margin_error(error_text, coin, info, config)
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error executing buy: {e}{Colors.END}")
+        return 1
 
 
 def cmd_sell(args):
@@ -1200,7 +1230,7 @@ def cmd_sell(args):
         # Set leverage if specified
         if args.leverage:
             if not _set_leverage(exchange, coin, args.leverage, not getattr(args, 'isolated', False)):
-                return
+                return 1
 
         # Get current price for reference
         if ':' in coin:
@@ -1216,6 +1246,7 @@ def cmd_sell(args):
         # Execute market sell
         result = exchange.market_open(coin, False, size, None, 0.01)  # 1% slippage
 
+        had_error = False
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
@@ -1229,13 +1260,17 @@ def cmd_sell(args):
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
                     _handle_margin_error(status['error'], coin, info, config)
+                    had_error = True
         else:
             error_text = str(result)
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
             _handle_margin_error(error_text, coin, info, config)
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error executing sell: {e}{Colors.END}")
+        return 1
 
 
 def cmd_limit_buy(args):
@@ -1260,6 +1295,7 @@ def cmd_limit_buy(args):
         # Place limit order
         result = exchange.order(coin, True, size, price, {"limit": {"tif": "Gtc"}})
 
+        had_error = False
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
@@ -1274,11 +1310,15 @@ def cmd_limit_buy(args):
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
+                    had_error = True
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error placing limit buy: {e}{Colors.END}")
+        return 1
 
 
 def cmd_limit_sell(args):
@@ -1303,6 +1343,7 @@ def cmd_limit_sell(args):
         # Place limit order
         result = exchange.order(coin, False, size, price, {"limit": {"tif": "Gtc"}})
 
+        had_error = False
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
@@ -1317,11 +1358,15 @@ def cmd_limit_sell(args):
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
+                    had_error = True
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error placing limit sell: {e}{Colors.END}")
+        return 1
 
 
 def _get_position_for_coin(info, address, coin):
@@ -1392,16 +1437,16 @@ def cmd_stop_loss(args):
         position = _get_position_for_coin(info, config['account_address'], coin)
         if not position:
             print(f"{Colors.RED}Error: No open position for {coin}{Colors.END}")
-            return
+            return 1
 
         position_size = float(position.get('szi', 0))
         max_close_size = abs(position_size)
         if size <= 0:
             print(f"{Colors.RED}Error: Size must be greater than 0{Colors.END}")
-            return
+            return 1
         if size > max_close_size:
             print(f"{Colors.RED}Error: Size {size} exceeds open position size {max_close_size:.4f}{Colors.END}")
-            return
+            return 1
 
         # Closing side is defined by position direction, not trigger relative price.
         is_buy = position_size < 0
@@ -1416,7 +1461,7 @@ def cmd_stop_loss(args):
         validation_error = _validate_trigger_side('sl', position_size, trigger_price, current_price)
         if validation_error:
             print(f"{Colors.RED}Error: {validation_error}{Colors.END}")
-            return
+            return 1
 
         order_type = {
             "trigger": {
@@ -1428,6 +1473,7 @@ def cmd_stop_loss(args):
 
         result = exchange.order(coin, is_buy, size, trigger_price, order_type, reduce_only=True)
 
+        had_error = False
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
@@ -1442,11 +1488,15 @@ def cmd_stop_loss(args):
                     print(f"  Type: Market order when triggered")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
+                    had_error = True
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error placing stop-loss: {e}{Colors.END}")
+        return 1
 
 
 def cmd_take_profit(args):
@@ -1464,16 +1514,16 @@ def cmd_take_profit(args):
         position = _get_position_for_coin(info, config['account_address'], coin)
         if not position:
             print(f"{Colors.RED}Error: No open position for {coin}{Colors.END}")
-            return
+            return 1
 
         position_size = float(position.get('szi', 0))
         max_close_size = abs(position_size)
         if size <= 0:
             print(f"{Colors.RED}Error: Size must be greater than 0{Colors.END}")
-            return
+            return 1
         if size > max_close_size:
             print(f"{Colors.RED}Error: Size {size} exceeds open position size {max_close_size:.4f}{Colors.END}")
-            return
+            return 1
 
         # Closing side is defined by position direction, not trigger relative price.
         is_buy = position_size < 0
@@ -1488,7 +1538,7 @@ def cmd_take_profit(args):
         validation_error = _validate_trigger_side('tp', position_size, trigger_price, current_price)
         if validation_error:
             print(f"{Colors.RED}Error: {validation_error}{Colors.END}")
-            return
+            return 1
 
         order_type = {
             "trigger": {
@@ -1500,6 +1550,7 @@ def cmd_take_profit(args):
 
         result = exchange.order(coin, is_buy, size, trigger_price, order_type, reduce_only=True)
 
+        had_error = False
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
@@ -1514,11 +1565,15 @@ def cmd_take_profit(args):
                     print(f"  Type: Market order when triggered")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
+                    had_error = True
         else:
             print(f"\n{Colors.RED}Order failed: {result}{Colors.END}")
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error placing take-profit: {e}{Colors.END}")
+        return 1
 
 
 def cmd_close(args):
@@ -1550,7 +1605,7 @@ def cmd_close(args):
 
         if not position or float(position['szi']) == 0:
             print(f"{Colors.YELLOW}No open position for {coin}{Colors.END}")
-            return
+            return 0
 
         size = float(position['szi'])
         entry_px = float(position['entryPx'])
@@ -1563,6 +1618,7 @@ def cmd_close(args):
         # Close position
         result = exchange.market_close(coin)
 
+        had_error = False
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
@@ -1574,11 +1630,15 @@ def cmd_close(args):
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
+                    had_error = True
         else:
             print(f"\n{Colors.RED}Close failed: {result}{Colors.END}")
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error closing position: {e}{Colors.END}")
+        return 1
 
 
 def cmd_cancel(args):
@@ -1599,7 +1659,7 @@ def cmd_cancel(args):
 
         if not order:
             print(f"{Colors.YELLOW}Order {oid} not found in open orders{Colors.END}")
-            return
+            return 1
 
         coin = order.get('coin')
         print(f"\n{Colors.BOLD}Canceling order {oid} ({coin}){Colors.END}")
@@ -1609,11 +1669,14 @@ def cmd_cancel(args):
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             print(f"{Colors.GREEN}Order canceled!{Colors.END}")
+            return 0
         else:
             print(f"{Colors.RED}Cancel failed: {result}{Colors.END}")
+            return 1
 
     except Exception as e:
         print(f"{Colors.RED}Error canceling order: {e}{Colors.END}")
+        return 1
 
 
 def cmd_cancel_all(args):
@@ -1644,7 +1707,7 @@ def cmd_cancel_all(args):
 
         if not cancel_requests:
             print(f"{Colors.DIM}No open orders to cancel{Colors.END}")
-            return
+            return 0
 
         print(f"Found {len(cancel_requests)} open orders")
 
@@ -1653,6 +1716,7 @@ def cmd_cancel_all(args):
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
+            had_error = False
             for i, status in enumerate(statuses):
                 coin = cancel_requests[i]['coin'] if i < len(cancel_requests) else '?'
                 oid = cancel_requests[i]['oid'] if i < len(cancel_requests) else '?'
@@ -1660,14 +1724,18 @@ def cmd_cancel_all(args):
                     print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
                 elif isinstance(status, dict) and 'error' in status:
                     print(f"  {Colors.RED}Failed {coin} order {oid}: {_humanize_error(status['error'], info)}{Colors.END}")
+                    had_error = True
                 else:
                     print(f"  {Colors.GREEN}Canceled {coin} order {oid}{Colors.END}")
             print(f"\n{Colors.GREEN}Done!{Colors.END}")
+            return 1 if had_error else 0
         else:
             print(f"{Colors.RED}Bulk cancel failed: {result}{Colors.END}")
+            return 1
 
     except Exception as e:
         print(f"{Colors.RED}Error canceling orders: {e}{Colors.END}")
+        return 1
 
 
 def cmd_modify_order(args):
@@ -1689,7 +1757,7 @@ def cmd_modify_order(args):
 
         if not order:
             print(f"{Colors.YELLOW}Order {oid} not found in open orders{Colors.END}")
-            return
+            return 1
 
         coin = order['coin']
         is_buy = order['side'] == 'B'
@@ -1710,6 +1778,7 @@ def cmd_modify_order(args):
             {"limit": {"tif": "Gtc"}},
         )
 
+        had_error = False
         if result.get('status') == 'ok':
             _invalidate_proxy_cache(config)
             statuses = result.get('response', {}).get('data', {}).get('statuses', [])
@@ -1724,11 +1793,15 @@ def cmd_modify_order(args):
                     print(f"  Avg Price: {format_price(float(filled.get('avgPx', 0)))}")
                 elif 'error' in status:
                     print(f"\n{Colors.RED}Error: {_humanize_error(status['error'], info)}{Colors.END}")
+                    had_error = True
         else:
             print(f"\n{Colors.RED}Modify failed: {result}{Colors.END}")
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error modifying order: {e}{Colors.END}")
+        return 1
 
 
 def cmd_analyze(args):
@@ -1884,10 +1957,12 @@ For sentiment analysis (slower, uses Grok):
   python market_analyzer.py
 """)
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error during analysis: {e}{Colors.END}")
         import traceback
         traceback.print_exc()
+        return 1
 
 
 def cmd_raw(args):
@@ -1939,8 +2014,10 @@ def cmd_raw(args):
             trades = resp.json()[-10:]
             print(json.dumps(trades, indent=2))
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return 1
 
 
 def cmd_candles(args):
@@ -1962,7 +2039,7 @@ def cmd_candles(args):
         start_ms = now_ms - (amount * 7 * 86400 * 1000)
     else:
         print(f"{Colors.RED}Invalid lookback format. Use e.g., 24h, 7d, 2w{Colors.END}")
-        return
+        return 1
 
     print(f"\n{Colors.BOLD}{coin} Candles ({interval}, last {lookback}){Colors.END}")
     print("=" * 80)
@@ -1972,7 +2049,7 @@ def cmd_candles(args):
 
         if not candles:
             print(f"{Colors.DIM}No candle data{Colors.END}")
-            return
+            return 0
 
         # Print table
         print(f"  {'Time':<18} {'Open':>12} {'High':>12} {'Low':>12} {'Close':>12} {'Volume':>14}")
@@ -2018,8 +2095,10 @@ def cmd_candles(args):
                 sma50 = sum(closes[-50:]) / 50
                 print(f"  SMA(50):       {format_price(sma50)}")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching candles: {e}{Colors.END}")
+        return 1
 
 
 def cmd_funding_history(args):
@@ -2045,7 +2124,7 @@ def cmd_funding_history(args):
         data = info.funding_history(coin, start_ms, now_ms)
         if not data:
             print(f"No funding history for {coin}")
-            return
+            return 0
 
         print(f"\n{Colors.BOLD}{coin} Funding History (last {lookback}){Colors.END}")
         print("=" * 70)
@@ -2076,8 +2155,10 @@ def cmd_funding_history(args):
         print(f"  Min rate:       {min_rate*100:+.6f}%")
         print()
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching funding history: {e}{Colors.END}")
+        return 1
 
 
 def cmd_trades(args):
@@ -2091,7 +2172,7 @@ def cmd_trades(args):
         data = info.post("/info", {"type": "recentTrades", "coin": coin})
         if not data:
             print(f"No recent trades for {coin}")
-            return
+            return 0
 
         # Take last N trades
         trades = data[-limit:] if len(data) > limit else data
@@ -2133,8 +2214,10 @@ def cmd_trades(args):
         print(f"  Bias:           {bias_color}{bias}{Colors.END}")
         print()
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching recent trades: {e}{Colors.END}")
+        return 1
 
 
 def cmd_user_funding(args):
@@ -2159,7 +2242,7 @@ def cmd_user_funding(args):
         data = info.user_funding_history(config['account_address'], start_ms, now_ms)
         if not data:
             print(f"No funding payments in the last {lookback}")
-            return
+            return 0
 
         print(f"\n{Colors.BOLD}Your Funding Payments (last {lookback}){Colors.END}")
         print("=" * 80)
@@ -2195,8 +2278,10 @@ def cmd_user_funding(args):
                 print(f"    {coin:<12} {c}${amt:>+,.4f}{Colors.END}")
         print()
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching funding payments: {e}{Colors.END}")
+        return 1
 
 
 def cmd_portfolio(args):
@@ -2206,7 +2291,7 @@ def cmd_portfolio(args):
     address = args.address if hasattr(args, 'address') and args.address else config.get('account_address', '')
     if not address:
         print(f"{Colors.RED}Error: No account address. Set HL_ACCOUNT_ADDRESS or use --address.{Colors.END}")
-        return
+        return 1
 
     try:
         # Show current portfolio value as header
@@ -2224,7 +2309,7 @@ def cmd_portfolio(args):
         data = info.portfolio(address)
         if not data:
             print("No portfolio data available")
-            return
+            return 0
 
         # API returns [["day", {data}], ["week", {data}], ...] or dict
         periods = {}
@@ -2263,8 +2348,10 @@ def cmd_portfolio(args):
 
         print()
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching portfolio: {e}{Colors.END}")
+        return 1
 
 
 def _cmd_scan_sorted(assets, hip3_data, sort_key, reverse, top_n, min_volume):
@@ -2298,6 +2385,8 @@ def _cmd_scan_sorted(assets, hip3_data, sort_key, reverse, top_n, min_volume):
         funding_color = Colors.GREEN if a['funding_apr'] < -10 else Colors.RED if a['funding_apr'] > 10 else Colors.YELLOW
         chg_color = Colors.GREEN if a['pct_change'] > 0 else Colors.RED if a['pct_change'] < 0 else Colors.END
         print(f"{a['name']:<14} ${a['price']:>10,.2f} {funding_color}{a['funding_apr']:>11.1f}%{Colors.END} ${a.get('oi_ntl', 0):>12,.0f} ${a.get('volume', 0):>12,.0f} {chg_color}{a['pct_change']:>+8.2f}%{Colors.END}")
+
+    return 0
 
 
 def cmd_scan(args):
@@ -2451,10 +2540,12 @@ def cmd_scan(args):
             best_hip3 = min(hip3_data, key=lambda x: x['funding_apr'])
             print(f"  Best HIP-3 opportunity: {best_hip3['name']} at {best_hip3['funding_apr']:.1f}% APR")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error scanning: {e}{Colors.END}")
         import traceback
         traceback.print_exc()
+        return 1
 
 
 def cmd_hip3(args):
@@ -2486,6 +2577,7 @@ def cmd_hip3(args):
     print(f"\n{Colors.BOLD}{Colors.MAGENTA}HIP-3 EQUITY PERPS DATA{Colors.END}")
     print("=" * 80)
 
+    had_error = False
     for coin in assets:
         try:
             print(f"\n{Colors.BOLD}{coin}{Colors.END}")
@@ -2549,7 +2641,9 @@ def cmd_hip3(args):
 
         except Exception as e:
             print(f"  {Colors.RED}Error: {e}{Colors.END}")
+            had_error = True
 
+    return 1 if had_error else 0
 
 def cmd_sentiment(args):
     """Get sentiment analysis for an asset using Grok API."""
@@ -2559,13 +2653,14 @@ def cmd_sentiment(args):
     if not grok_api_key:
         print(f"{Colors.RED}Error: XAI_API_KEY not set in .env{Colors.END}")
         print("Add your Grok API key to use sentiment analysis")
-        return
+        return 1
 
     print(f"\n{Colors.BOLD}{Colors.CYAN}SENTIMENT ANALYSIS: {coin}{Colors.END}")
     print("=" * 60)
 
     try:
         import requests as req
+        had_error = False
 
         # Web search
         print(f"\n{Colors.BOLD}Web Search (News & Analysis):{Colors.END}")
@@ -2595,6 +2690,7 @@ def cmd_sentiment(args):
                             print(f"{Colors.DIM}{text}{Colors.END}")
         else:
             print(f"{Colors.RED}Web search error: {response.status_code}{Colors.END}")
+            had_error = True
 
         # X/Twitter search
         print(f"\n{Colors.BOLD}X/Twitter Sentiment:{Colors.END}")
@@ -2624,9 +2720,12 @@ def cmd_sentiment(args):
                             print(f"{Colors.DIM}{text}{Colors.END}")
         else:
             print(f"{Colors.RED}X search error: {response.status_code}{Colors.END}")
+            had_error = True
 
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return 1
 
 
 def cmd_search(args):
@@ -2639,7 +2738,7 @@ def cmd_search(args):
     if not grok_api_key:
         print(f"{Colors.RED}Error: XAI_API_KEY not set in .env{Colors.END}")
         print("Add your Grok API key to use search")
-        return
+        return 1
 
     print(f"\n{Colors.BOLD}{Colors.CYAN}SEARCH: \"{query}\"{Colors.END}")
     print("=" * 60)
@@ -2675,14 +2774,20 @@ def cmd_search(args):
 
         if not x_only:
             print(f"\n{Colors.BOLD}Web:{Colors.END}")
-            _grok_search(query, "web_search")
+            web_ok = _grok_search(query, "web_search")
+        else:
+            web_ok = True
 
         if not web_only:
             print(f"\n{Colors.BOLD}X/Twitter:{Colors.END}")
-            _grok_search(query, "x_search")
+            x_ok = _grok_search(query, "x_search")
+        else:
+            x_ok = True
 
+        return 0 if (web_ok and x_ok) else 1
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return 1
 
 
 def cmd_unlocks(args):
@@ -2692,7 +2797,7 @@ def cmd_unlocks(args):
     grok_api_key = os.getenv('XAI_API_KEY')
     if not grok_api_key:
         print(f"{Colors.RED}Error: XAI_API_KEY not set in .env{Colors.END}")
-        return
+        return 1
 
     # If no coin specified, check current positions
     if not args.coins:
@@ -2710,16 +2815,17 @@ def cmd_unlocks(args):
                         coins.append(coin)
             if not coins:
                 print("No native token positions found.")
-                return
+                return 0
         except Exception as e:
             print(f"{Colors.RED}Error getting positions: {e}{Colors.END}")
-            return
+            return 1
     else:
         coins = args.coins
 
     print(f"\n{Colors.BOLD}{Colors.CYAN}TOKEN UNLOCK CHECK{Colors.END}")
     print("=" * 70)
 
+    had_error = False
     for coin in coins:
         print(f"\n{Colors.BOLD}{coin}:{Colors.END}")
 
@@ -2751,11 +2857,14 @@ def cmd_unlocks(args):
                                 print(f"{Colors.DIM}{text}{Colors.END}")
             else:
                 print(f"{Colors.RED}Search error: {response.status_code}{Colors.END}")
+                had_error = True
 
         except Exception as e:
             print(f"{Colors.RED}Error: {e}{Colors.END}")
+            had_error = True
 
     print()
+    return 1 if had_error else 0
 
 
 def cmd_devcheck(args):
@@ -2767,12 +2876,13 @@ def cmd_devcheck(args):
     grok_api_key = os.getenv('XAI_API_KEY')
     if not grok_api_key:
         print(f"{Colors.RED}Error: XAI_API_KEY not set in .env{Colors.END}")
-        return
+        return 1
 
     print(f"\n{Colors.BOLD}{Colors.CYAN}DEVELOPER CHECK: {coin}{Colors.END}")
     print("=" * 70)
 
     try:
+        had_error = False
         # Search for developer issues/complaints
         print(f"\n{Colors.BOLD}Developer Sentiment & Issues:{Colors.END}")
         dev_query = f"""Search for developer complaints, issues, or concerns about {coin} blockchain/protocol:
@@ -2806,6 +2916,7 @@ Be specific with examples and sources."""
                             print(f"{Colors.DIM}{text}{Colors.END}")
         else:
             print(f"{Colors.RED}Search error: {response.status_code}{Colors.END}")
+            had_error = True
 
         # X/Twitter dev sentiment
         print(f"\n{Colors.BOLD}X/Twitter Dev Chatter:{Colors.END}")
@@ -2835,11 +2946,13 @@ Be specific with examples and sources."""
                             print(f"{Colors.DIM}{text}{Colors.END}")
         else:
             print(f"{Colors.RED}X search error: {response.status_code}{Colors.END}")
+            had_error = True
 
+        print()
+        return 1 if had_error else 0
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
-
-    print()
+        return 1
 
 
 def cmd_polymarket(args):
@@ -2877,12 +2990,12 @@ def cmd_polymarket(args):
         r = httpx.get(url, timeout=15)
         if r.status_code != 200:
             print(f"{Colors.RED}API error: {r.status_code}{Colors.END}")
-            return
+            return 1
 
         events = r.json()
         if not events:
             print(f"{Colors.DIM}No active events found for '{category}'.{Colors.END}")
-            return
+            return 0
 
         # Client-side title filter for btc/eth
         if title_filter:
@@ -2893,7 +3006,7 @@ def cmd_polymarket(args):
 
         if not events:
             print(f"{Colors.DIM}No matching events found for '{category}'.{Colors.END}")
-            return
+            return 0
 
         for event in events[:10]:
             title = event.get('title', 'Unknown')
@@ -2927,8 +3040,10 @@ def cmd_polymarket(args):
 
         print()
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return 1
 
 
 def cmd_dexes(args):
@@ -2973,10 +3088,11 @@ def cmd_dexes(args):
             if leverages:
                 print(f"Leverage: {min(leverages)}-{max(leverages)}x")
 
+        print()
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error fetching dexes: {e}{Colors.END}")
-
-    print()
+        return 1
 
 
 def cmd_history(args):
@@ -2993,7 +3109,7 @@ def cmd_history(args):
 
         if not fills:
             print("No trades found.")
-            return
+            return 0
 
         # Limit results
         limit = args.limit if hasattr(args, 'limit') and args.limit else 20
@@ -3016,8 +3132,10 @@ def cmd_history(args):
 
         print(f"\n{Colors.DIM}Showing last {len(recent)} trades. Use --limit N for more.{Colors.END}")
 
+        return 0
     except Exception as e:
         print(f"{Colors.RED}Error: {e}{Colors.END}")
+        return 1
 
 
 # ============================================================================
@@ -3173,7 +3291,7 @@ def main():
 
     if not args.command:
         parser.print_help()
-        return
+        return 0
 
     # Route to command handlers
     commands = {
@@ -3215,10 +3333,16 @@ def main():
     }
 
     if args.command in commands:
-        commands[args.command](args)
+        result = commands[args.command](args)
+        if isinstance(result, bool):
+            return 0 if result else 1
+        if isinstance(result, int):
+            return result
+        return 0
     else:
         parser.print_help()
+        return 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
