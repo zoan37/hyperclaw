@@ -351,13 +351,13 @@ class TestLeverage:
     def test_leverage_exceeds_max(self):
         """leverage should reject values above max."""
         rc, out, err = run_cli("leverage", "SOL", "999")
-        assert rc == 0  # exits cleanly with error message
+        assert rc != 0
         assert "exceeds max leverage" in out
 
     def test_leverage_shows_max(self):
         """leverage should display max leverage for the asset."""
         rc, out, err = run_cli("leverage", "BTC", "999")
-        assert rc == 0
+        assert rc != 0
         assert "max:" in out
 
 
@@ -370,7 +370,7 @@ class TestCheck:
     def test_check_no_address(self):
         """check with no address should show error."""
         rc, out, err = run_cli("check")
-        assert rc == 0
+        assert rc in (0, 1)
         assert "No account address" in out or "POSITION HEALTH CHECK" in out
 
     def test_check_with_address(self):

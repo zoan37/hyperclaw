@@ -486,7 +486,7 @@ class TestMarginErrorGuidance:
         # Try to buy a large amount that will definitely exceed any leftover USDH
         # 10 US500 @ ~$680 = $6800 notional, needs ~$680 margin at 10x
         rc, out, err = run_cli("buy", "km:US500", "10")
-        assert rc == 0  # CLI exits cleanly
+        assert rc != 0
         # Should show guidance about USDH collateral
         assert "USDH" in out
         assert "swap" in out.lower()
