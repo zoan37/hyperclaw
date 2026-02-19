@@ -2787,6 +2787,8 @@ def cmd_search(args):
     print(f"\n{Colors.BOLD}{Colors.CYAN}SEARCH: \"{query}\"{Colors.END}")
     print("=" * 60)
 
+    had_error = False
+
     if not x_only:
         print(f"\n{Colors.BOLD}Web:{Colors.END}")
         ok, text = _grok_call(query, tools=["web_search"])
@@ -2794,6 +2796,7 @@ def cmd_search(args):
             print(f"{Colors.DIM}{text}{Colors.END}")
         else:
             print(f"{Colors.RED}Error: {text}{Colors.END}")
+            had_error = True
 
     if not web_only:
         print(f"\n{Colors.BOLD}X/Twitter:{Colors.END}")
@@ -2802,8 +2805,9 @@ def cmd_search(args):
             print(f"{Colors.DIM}{text}{Colors.END}")
         else:
             print(f"{Colors.RED}Error: {text}{Colors.END}")
+            had_error = True
 
-    return 0
+    return 1 if had_error else 0
 
 
 def cmd_unlocks(args):
