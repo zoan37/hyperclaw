@@ -2645,6 +2645,95 @@ def cmd_hip3(args):
 
     return 1 if had_error else 0
 
+def _grok_call(prompt: str, tools: list[str] | None = None, timeout: int = 60,
+               max_chars: int = 0) -> tuple[bool, str]:
+    """Shared Grok API helper. Sends a single call with specified tools.
+
+    Args:
+        prompt: The query to send to Grok.
+        tools: List of tool types (e.g., ["web_search", "x_search"]).
+               If None, uses both web_search and x_search.
+        timeout: Request timeout in seconds.
+        max_chars: If > 0, truncate output text to this many characters.
+
+    Returns:
+        (success: bool, text: str)
+    """
+    import requests as req
+
+    grok_api_key = os.getenv('XAI_API_KEY')
+    if not grok_api_key:
+        return False, "XAI_API_KEY not set in .env"
+
+    if tools is None:
+        tools = ["web_search", "x_search"]
+
+    tool_specs = [{"type": t} for t in tools]
+
+    try:
+        response = req.post(
+            "https://api.x.ai/v1/responses",
+            headers={
+                "Authorization": f"Bearer {grok_api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "grok-4-1-fast",
+                "tools": tool_specs,
+                "input": [{"role": "user", "content": prompt}]
+            },
+            timeout=timeout
+        )
+        if response.status_code == 200:
+            data = response.json()
+            texts = []
+            for item in data.get('output', []):
+                if item.get('type') == 'message':
+                    for content in item.get('content', []):
+                        if content.get('type') in ('text', 'output_text'):
+                            texts.append(content.get('text', ''))
+            result = "\n".join(texts)
+            if max_chars > 0 and len(result) > max_chars:
+                result = result[:max_chars]
+            return True, result
+        else:
+            return False, f"HTTP {response.status_code}"
+    except Exception as e:
+        return False, str(e)
+
+
+def cmd_ask(args):
+    """Ask Grok anything — it picks the right tools (web, X) automatically."""
+    query = args.query
+    web_only = args.web
+    x_only = args.x
+
+    grok_api_key = os.getenv('XAI_API_KEY')
+    if not grok_api_key:
+        print(f"{Colors.RED}Error: XAI_API_KEY not set in .env{Colors.END}")
+        print("Add your Grok API key: XAI_API_KEY=...")
+        return 1
+
+    print(f"\n{Colors.BOLD}{Colors.CYAN}ASK GROK:{Colors.END} {query}")
+    print("=" * 60)
+
+    # Determine tools
+    if web_only:
+        tools = ["web_search"]
+    elif x_only:
+        tools = ["x_search"]
+    else:
+        tools = ["web_search", "x_search"]
+
+    ok, text = _grok_call(query, tools=tools)
+    if ok:
+        print(f"{Colors.DIM}{text}{Colors.END}")
+        return 0
+    else:
+        print(f"{Colors.RED}Error: {text}{Colors.END}")
+        return 1
+
+
 def cmd_sentiment(args):
     """Get sentiment analysis for an asset using Grok API."""
     coin = args.coin
@@ -2658,74 +2747,29 @@ def cmd_sentiment(args):
     print(f"\n{Colors.BOLD}{Colors.CYAN}SENTIMENT ANALYSIS: {coin}{Colors.END}")
     print("=" * 60)
 
-    try:
-        import requests as req
-        had_error = False
+    had_error = False
 
-        # Web search
-        print(f"\n{Colors.BOLD}Web Search (News & Analysis):{Colors.END}")
-        web_query = f"What is the current market sentiment and recent news for {coin} cryptocurrency? Focus on price action, major developments, and whether traders are bullish or bearish. Be concise."
+    # Web search for news & analysis
+    print(f"\n{Colors.BOLD}Web Search (News & Analysis):{Colors.END}")
+    web_query = f"What is the current market sentiment and recent news for {coin} cryptocurrency? Focus on price action, major developments, and whether traders are bullish or bearish. Be concise."
+    ok, text = _grok_call(web_query, tools=["web_search"], max_chars=800)
+    if ok:
+        print(f"{Colors.DIM}{text}{Colors.END}")
+    else:
+        print(f"{Colors.RED}Web search error: {text}{Colors.END}")
+        had_error = True
 
-        response = req.post(
-            "https://api.x.ai/v1/responses",
-            headers={
-                "Authorization": f"Bearer {grok_api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "grok-4-1-fast",
-                "tools": [{"type": "web_search"}],
-                "input": [{"role": "user", "content": web_query}]
-            },
-            timeout=30
-        )
+    # X/Twitter sentiment
+    print(f"\n{Colors.BOLD}X/Twitter Sentiment:{Colors.END}")
+    x_query = f"What is the sentiment on X/Twitter about ${coin} in the last 24-48 hours? Are traders bullish or bearish? What are the key opinions? Be concise."
+    ok, text = _grok_call(x_query, tools=["x_search"], max_chars=800)
+    if ok:
+        print(f"{Colors.DIM}{text}{Colors.END}")
+    else:
+        print(f"{Colors.RED}X search error: {text}{Colors.END}")
+        had_error = True
 
-        if response.status_code == 200:
-            data = response.json()
-            for item in data.get('output', []):
-                if item.get('type') == 'message':
-                    for content in item.get('content', []):
-                        if content.get('type') in ('text', 'output_text'):
-                            text = content.get('text', '')[:800]
-                            print(f"{Colors.DIM}{text}{Colors.END}")
-        else:
-            print(f"{Colors.RED}Web search error: {response.status_code}{Colors.END}")
-            had_error = True
-
-        # X/Twitter search
-        print(f"\n{Colors.BOLD}X/Twitter Sentiment:{Colors.END}")
-        x_query = f"What is the sentiment on X/Twitter about ${coin} in the last 24-48 hours? Are traders bullish or bearish? What are the key opinions? Be concise."
-
-        response = req.post(
-            "https://api.x.ai/v1/responses",
-            headers={
-                "Authorization": f"Bearer {grok_api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "grok-4-1-fast",
-                "tools": [{"type": "x_search"}],
-                "input": [{"role": "user", "content": x_query}]
-            },
-            timeout=30
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            for item in data.get('output', []):
-                if item.get('type') == 'message':
-                    for content in item.get('content', []):
-                        if content.get('type') in ('text', 'output_text'):
-                            text = content.get('text', '')[:800]
-                            print(f"{Colors.DIM}{text}{Colors.END}")
-        else:
-            print(f"{Colors.RED}X search error: {response.status_code}{Colors.END}")
-            had_error = True
-
-        return 1 if had_error else 0
-    except Exception as e:
-        print(f"{Colors.RED}Error: {e}{Colors.END}")
-        return 1
+    return 1 if had_error else 0
 
 
 def cmd_search(args):
@@ -2743,51 +2787,23 @@ def cmd_search(args):
     print(f"\n{Colors.BOLD}{Colors.CYAN}SEARCH: \"{query}\"{Colors.END}")
     print("=" * 60)
 
-    try:
-        import requests as req
-
-        def _grok_search(prompt, tool_type):
-            response = req.post(
-                "https://api.x.ai/v1/responses",
-                headers={
-                    "Authorization": f"Bearer {grok_api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "grok-4-1-fast",
-                    "tools": [{"type": tool_type}],
-                    "input": [{"role": "user", "content": prompt}]
-                },
-                timeout=30
-            )
-            if response.status_code == 200:
-                data = response.json()
-                for item in data.get('output', []):
-                    if item.get('type') == 'message':
-                        for content in item.get('content', []):
-                            if content.get('type') in ('text', 'output_text'):
-                                print(f"{Colors.DIM}{content.get('text', '')}{Colors.END}")
-                return True
-            else:
-                print(f"{Colors.RED}Error: {response.status_code}{Colors.END}")
-                return False
-
-        if not x_only:
-            print(f"\n{Colors.BOLD}Web:{Colors.END}")
-            web_ok = _grok_search(query, "web_search")
+    if not x_only:
+        print(f"\n{Colors.BOLD}Web:{Colors.END}")
+        ok, text = _grok_call(query, tools=["web_search"])
+        if ok:
+            print(f"{Colors.DIM}{text}{Colors.END}")
         else:
-            web_ok = True
+            print(f"{Colors.RED}Error: {text}{Colors.END}")
 
-        if not web_only:
-            print(f"\n{Colors.BOLD}X/Twitter:{Colors.END}")
-            x_ok = _grok_search(query, "x_search")
+    if not web_only:
+        print(f"\n{Colors.BOLD}X/Twitter:{Colors.END}")
+        ok, text = _grok_call(query, tools=["x_search"])
+        if ok:
+            print(f"{Colors.DIM}{text}{Colors.END}")
         else:
-            x_ok = True
+            print(f"{Colors.RED}Error: {text}{Colors.END}")
 
-        return 0 if (web_ok and x_ok) else 1
-    except Exception as e:
-        print(f"{Colors.RED}Error: {e}{Colors.END}")
-        return 1
+    return 0
 
 
 def cmd_unlocks(args):
@@ -2829,38 +2845,13 @@ def cmd_unlocks(args):
     for coin in coins:
         print(f"\n{Colors.BOLD}{coin}:{Colors.END}")
 
-        try:
-            # Search for unlock info
-            query = f"What are the upcoming token unlocks or vesting events for {coin} cryptocurrency in the next 30 days? Include dates, amounts, and percentage of supply if available. Be specific and concise. If no unlocks found, say so."
-
-            response = req.post(
-                "https://api.x.ai/v1/responses",
-                headers={
-                    "Authorization": f"Bearer {grok_api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "grok-4-1-fast",
-                    "tools": [{"type": "web_search"}],
-                    "input": [{"role": "user", "content": query}]
-                },
-                timeout=30
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                for item in data.get('output', []):
-                    if item.get('type') == 'message':
-                        for content in item.get('content', []):
-                            if content.get('type') in ('text', 'output_text'):
-                                text = content.get('text', '')[:600]
-                                print(f"{Colors.DIM}{text}{Colors.END}")
-            else:
-                print(f"{Colors.RED}Search error: {response.status_code}{Colors.END}")
-                had_error = True
-
-        except Exception as e:
-            print(f"{Colors.RED}Error: {e}{Colors.END}")
+        query = f"What are the upcoming token unlocks or vesting events for {coin} cryptocurrency in the next 30 days? Include dates, amounts, and percentage of supply if available. Be specific and concise. If no unlocks found, say so."
+        ok, text = _grok_call(query, tools=["web_search"], max_chars=600)
+        if ok:
+            print(f"{Colors.DIM}{text}{Colors.END}")
+        else:
+            print(f"{Colors.RED}Search error: {text}{Colors.END}")
+            had_error = True
             had_error = True
 
     print()
@@ -2881,78 +2872,36 @@ def cmd_devcheck(args):
     print(f"\n{Colors.BOLD}{Colors.CYAN}DEVELOPER CHECK: {coin}{Colors.END}")
     print("=" * 70)
 
-    try:
-        had_error = False
-        # Search for developer issues/complaints
-        print(f"\n{Colors.BOLD}Developer Sentiment & Issues:{Colors.END}")
-        dev_query = f"""Search for developer complaints, issues, or concerns about {coin} blockchain/protocol:
+    had_error = False
+
+    # Search for developer issues/complaints
+    print(f"\n{Colors.BOLD}Developer Sentiment & Issues:{Colors.END}")
+    dev_query = f"""Search for developer complaints, issues, or concerns about {coin} blockchain/protocol:
 1. Are developers leaving or switching to other chains?
 2. Any complaints about costs, centralization, or technical issues?
 3. Any apps or projects that abandoned {coin} for competitors?
 4. What are devs saying in forums, Discord, or X?
 Be specific with examples and sources."""
 
-        response = req.post(
-            "https://api.x.ai/v1/responses",
-            headers={
-                "Authorization": f"Bearer {grok_api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "grok-4-1-fast",
-                "tools": [{"type": "web_search"}],
-                "input": [{"role": "user", "content": dev_query}]
-            },
-            timeout=45
-        )
+    ok, text = _grok_call(dev_query, tools=["web_search"], max_chars=1200)
+    if ok:
+        print(f"{Colors.DIM}{text}{Colors.END}")
+    else:
+        print(f"{Colors.RED}Search error: {text}{Colors.END}")
+        had_error = True
 
-        if response.status_code == 200:
-            data = response.json()
-            for item in data.get('output', []):
-                if item.get('type') == 'message':
-                    for content in item.get('content', []):
-                        if content.get('type') in ('text', 'output_text'):
-                            text = content.get('text', '')[:1200]
-                            print(f"{Colors.DIM}{text}{Colors.END}")
-        else:
-            print(f"{Colors.RED}Search error: {response.status_code}{Colors.END}")
-            had_error = True
+    # X/Twitter dev sentiment
+    print(f"\n{Colors.BOLD}X/Twitter Dev Chatter:{Colors.END}")
+    x_query = f"What are developers saying about {coin} on X/Twitter? Look for: complaints, frustrations, projects leaving, technical issues, cost concerns. Not price speculation - developer experience only."
+    ok, text = _grok_call(x_query, tools=["x_search"], max_chars=800)
+    if ok:
+        print(f"{Colors.DIM}{text}{Colors.END}")
+    else:
+        print(f"{Colors.RED}X search error: {text}{Colors.END}")
+        had_error = True
 
-        # X/Twitter dev sentiment
-        print(f"\n{Colors.BOLD}X/Twitter Dev Chatter:{Colors.END}")
-        x_query = f"What are developers saying about {coin} on X/Twitter? Look for: complaints, frustrations, projects leaving, technical issues, cost concerns. Not price speculation - developer experience only."
-
-        response = req.post(
-            "https://api.x.ai/v1/responses",
-            headers={
-                "Authorization": f"Bearer {grok_api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "grok-4-1-fast",
-                "tools": [{"type": "x_search"}],
-                "input": [{"role": "user", "content": x_query}]
-            },
-            timeout=30
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            for item in data.get('output', []):
-                if item.get('type') == 'message':
-                    for content in item.get('content', []):
-                        if content.get('type') in ('text', 'output_text'):
-                            text = content.get('text', '')[:800]
-                            print(f"{Colors.DIM}{text}{Colors.END}")
-        else:
-            print(f"{Colors.RED}X search error: {response.status_code}{Colors.END}")
-            had_error = True
-
-        print()
-        return 1 if had_error else 0
-    except Exception as e:
-        print(f"{Colors.RED}Error: {e}{Colors.END}")
-        return 1
+    print()
+    return 1 if had_error else 0
 
 
 def cmd_polymarket(args):
@@ -3264,6 +3213,11 @@ def main():
     sentiment_parser = subparsers.add_parser('sentiment', help='Get Grok sentiment analysis for an asset')
     sentiment_parser.add_argument('coin', help='Asset to analyze sentiment for')
 
+    ask_parser = subparsers.add_parser('ask', help='Ask Grok anything (auto-picks web/X tools)')
+    ask_parser.add_argument('query', help='Question for Grok')
+    ask_parser.add_argument('--web', action='store_true', help='Web search only')
+    ask_parser.add_argument('--x', action='store_true', help='X/Twitter search only')
+
     search_parser = subparsers.add_parser('search', help='Search web and X/Twitter via Grok')
     search_parser.add_argument('query', help='Search query (any topic)')
     search_parser.add_argument('--web', action='store_true', help='Web search only')
@@ -3324,6 +3278,7 @@ def main():
         'scan': cmd_scan,
         'sentiment': cmd_sentiment,
         'search': cmd_search,
+        'ask': cmd_ask,
         'hip3': cmd_hip3,
         'polymarket': cmd_polymarket,
         'dexes': cmd_dexes,
