@@ -36,7 +36,7 @@ See [SKILL.md](SKILL.md) for the full command reference and usage instructions t
 - **Market Data:** `price`, `funding`, `book`, `candles`, `funding-history`, `trades`, `raw`
 - **Analysis:** `analyze`, `scan`, `hip3`, `dexes`, `history`
 - **Trading:** `leverage`, `buy`, `sell`, `limit-buy`, `limit-sell`, `stop-loss`, `take-profit`, `close`, `cancel`, `cancel-all`, `modify-order`
-- **Intelligence (requires Grok API):** `sentiment`, `unlocks`, `devcheck`
+- **Intelligence (requires Grok API):** `sentiment`, `unlocks`, `devcheck`, `ask`, `search`
 - **Prediction Markets:** `polymarket`
 
 ## Account Setup

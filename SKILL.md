@@ -1,6 +1,6 @@
 ---
 name: hyperclaw
-description: Trade on Hyperliquid. Supports 228+ perps, HIP-3 equity/commodity perps (TSLA, GOLD), market scanning, sentiment analysis, and prediction market data. Commands for account status, market data, funding rates, order book, trading, and intelligence gathering.
+description: Trade on Hyperliquid. Supports 228+ perps, HIP-3 equity/commodity perps (TSLA, GOLD), market scanning, sentiment analysis, Grok web/X search, and prediction market data. Commands for account status, market data, funding rates, order book, trading, and intelligence gathering.
 user-invocable: true
 metadata:
   openclaw:
@@ -32,7 +32,7 @@ HL_TESTNET=false
 
 Get API keys from: https://app.hyperliquid.xyz/API — use a separate API wallet, not your main wallet private key.
 
-Optional for intelligence commands (sentiment, unlocks, devcheck):
+Optional for intelligence commands (sentiment, unlocks, devcheck, ask, search):
 ```
 XAI_API_KEY=xai-...
 ```
@@ -80,7 +80,7 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | Command | Description | Example |
 |---------|-------------|---------|
 | `analyze [COINS...]` | Comprehensive market analysis (prices, funding, OI, volume, book depth) | `hyperliquid_tools.py analyze BTC ETH SOL` |
-| `scan` | Scan all perps for funding opportunities. `--sort {funding\|volume\|oi\|price-change}` outputs a single flat table sorted by the chosen metric (default: multi-section view). | `hyperliquid_tools.py scan --top 20 --min-volume 100000` or `scan --sort volume --top 10` |
+| `scan` | Scan all perps for funding opportunities. `--sort {funding\|volume\|oi\|price-change}` outputs a single flat table sorted by the chosen metric (default: multi-section view). `--reverse` reverses sort direction. | `hyperliquid_tools.py scan --top 20 --min-volume 100000` or `scan --sort volume --top 10 --reverse` |
 | `hip3 [COIN]` | HIP-3 perp data (price, spread, funding) | `hyperliquid_tools.py hip3 TSLA` |
 | `hip3` | All HIP-3 dex assets | `hyperliquid_tools.py hip3` |
 | `dexes` | List all HIP-3 dexes and their assets | `hyperliquid_tools.py dexes` |
@@ -114,6 +114,8 @@ After configuring `.env`, start the caching proxy (prevents rate limiting):
 | `sentiment COIN` | Grok web + X/Twitter sentiment analysis | `hyperliquid_tools.py sentiment BTC` |
 | `unlocks [COINS...]` | Token unlock schedules (defaults to current positions) | `hyperliquid_tools.py unlocks SOL HYPE` |
 | `devcheck COIN` | Developer sentiment and exodus signals | `hyperliquid_tools.py devcheck SOL` |
+| `ask QUERY` | Ask Grok a question — single API call with web + X tools, returns one blended answer. `--web` for web only, `--x` for X only. | `hyperliquid_tools.py ask "what's driving ETH price today?"` or `ask "BTC whale activity" --x` |
+| `search QUERY` | Search web and X/Twitter via Grok — separate API calls per source, prints results in distinct sections for more exhaustive coverage. `--web` for web only, `--x` for X only. | `hyperliquid_tools.py search "Hyperliquid token unlock schedule"` or `search "SOL news" --web` |
 
 ### Prediction Markets
 
@@ -213,7 +215,7 @@ The proxy caches `/info` read responses (metadata 300s, prices 5s, user state 2s
 | `HL_TESTNET` | No | `false` for mainnet (default), `true` for testnet |
 | `HL_PROXY_URL` | Recommended | Caching proxy URL (default: `http://localhost:18731`) |
 | `HL_ENV_FILE` | No | Override `.env` file path. When set, loads env vars from this file instead of default `.env` discovery. Useful for wrapper scripts that route to hyperclaw from other projects. |
-| `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck |
+| `XAI_API_KEY` | For intelligence | Grok API key for sentiment/unlocks/devcheck/ask/search |
 
 **Read-only commands** (`price`, `funding`, `book`, `scan`, `hip3`, `dexes`, `raw`, `polymarket`) work without credentials. Trading and account commands require `HL_ACCOUNT_ADDRESS` and `HL_SECRET_KEY`.
 
